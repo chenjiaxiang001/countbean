@@ -1,0 +1,22 @@
+# Third-party assets
+
+## OCR model and dictionary
+
+PP-OCRv4 mobile recognition model from PaddleOCR, distributed by RapidOCR (Apache-2.0).
+
+- Upstream: https://github.com/PaddlePaddle/PaddleOCR
+- Distributor: https://github.com/RapidAI/RapidOCR
+- Model: https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv4/rec/ch_PP-OCRv4_rec_mobile.onnx
+- Local file: `vendor/ocr/ppocr-v4-rec.onnx`
+- SHA-256: `48fc40f24f6d2a207a2b1091d3437eb3cc3eb6b676dc3ef9c37384005483683b`
+- `characters.json` contains the model's character dictionary extracted from the distributed model metadata. Model weights are unchanged; preprocessing and CTC decoding are implemented in `ocr-runtime.js`.
+- License texts: `vendor/ocr/PADDLEOCR-LICENSE.txt`, `vendor/ocr/RAPIDOCR-LICENSE.txt`.
+
+## ONNX Runtime Web
+
+Version 1.20.1, Microsoft, MIT license. JavaScript, MJS and WASM artifacts copied from the npm package `onnxruntime-web/dist` without modification.
+
+- https://github.com/microsoft/onnxruntime
+- License: `vendor/ocr/ONNXRUNTIME-LICENSE.txt`.
+
+Other investigated projects are listed in `docs/recognition-report.md`. Their source code was not incorporated.

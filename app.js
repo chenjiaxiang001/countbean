@@ -11,9 +11,16 @@ let sourceImage = null;
 let cropRect = null;
 let footerRect = null;
 let cropDrag = null;
+let cropTapAnchor = null;
+let pointerStart = null;
 let selectionMode = 'board';
 let recognitionDraft = null;
-let samplingLegendCode = null;
+let samplingLegendIndex = null;
+let recognitionSamples = null;
+let draftHighlight = "all";
+let draftSelection = null;
+let ocrSequence = 0;
+const ocrRequests = new Map();
 let ocrWorker = null;
 let ocrWorkerPromise = null;
 let sourceCanvas = null;
@@ -63,6 +70,8 @@ function renderPatterns() {
   if (editPatternId) renderEditor(editPatternId);
 }
 function countPattern(pattern) { return pattern.cells.reduce((counts, code) => { if (colorMap.has(code)) counts[code] = (counts[code] || 0) + 1; return counts; }, {}); }
+function patternColor(pattern,code){const rgb=pattern.legend?.find(c=>c.code===code)?.rgb;return rgb?`rgb(${rgb.join(',')})`:colorMap.get(code)?.color||(code==='?'?'#f5d1cc':'#fff');}
+function patternTextColor(pattern,code){const rgb=pattern.legend?.find(c=>c.code===code)?.rgb;const hex=colorMap.get(code)?.color;const c=rgb||(hex?[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)):[255,255,255]);return c[0]*.299+c[1]*.587+c[2]*.114<135?'#fff':'#18211d';}
 function gridMarkup(pattern, { mode = 'edit', chosen = 'all', size = cellSize, highlight = false } = {}) {
   const parts = ['<span class="coordinate-label corner">·</span>'];
   for (let col = 1; col <= pattern.width; col++) parts.push(`<span class="coordinate-label">${col}</span>`);
@@ -70,12 +79,12 @@ function gridMarkup(pattern, { mode = 'edit', chosen = 'all', size = cellSize, h
     parts.push(`<span class="coordinate-label row-label">${row + 1}</span>`);
     for (let col = 0; col < pattern.width; col++) {
       const index = row * pattern.width + col; const code = pattern.cells[index];
-      const dim = mode === 'work' ? chosen !== 'all' && code !== chosen : highlight && selectedEditColor !== code;
+      const dim = mode === 'work' || mode === 'draft' ? chosen !== 'all' && code !== chosen : highlight && selectedEditColor !== code;
       const done = mode === 'work' && pattern.done?.[index];
-      const key = mode === 'work' ? 'workcell' : 'cell';
-      const color = colorMap.get(code)?.color || (code === '?' ? '#f5d1cc' : '#fff');
+      const key = mode === 'work' ? 'workcell' : mode === 'draft' ? 'draftcell' : 'cell';
+      const color = patternColor(pattern,code);
       const label = code === '?' ? '?' : code || '';
-      parts.push(`<button class="pattern-cell ${code === '?' ? 'unknown' : ''} ${dim ? 'dim' : ''} ${done ? 'done' : ''}" data-${key}="${index}" title="第 ${row + 1} 行 · 第 ${col + 1} 列 · ${code === '?' ? '待校对' : code || '空格'}" style="background:${color}">${size >= 24 ? esc(label) : ''}</button>`);
+      parts.push(`<button class="pattern-cell ${code === '?' ? 'unknown' : ''} ${dim ? 'dim' : ''} ${done ? 'done' : ''}" data-${key}="${index}" title="第 ${row + 1} 行 · 第 ${col + 1} 列 · ${code === '?' ? '待校对' : code || '空格'}" style="background:${color};color:${patternTextColor(pattern,code)}">${size >= 24 ? esc(label) : ''}</button>`);
     }
   }
   return `<div class="pattern-canvas" style="--cell-size:${size}px;grid-template-columns:30px repeat(${pattern.width}, ${size}px);grid-template-rows:30px repeat(${pattern.height}, ${size}px)">${parts.join('')}</div>`;
@@ -116,27 +125,33 @@ function drawImageCanvas() {
   const activeRect = selectionMode === 'board' ? cropRect : footerRect;
   if (activeRect) shadeOutside(activeRect, '#10221c77');
   if (cropRect) { ctx.strokeStyle = '#ffed8b'; ctx.lineWidth = Math.max(3, canvas.width / 500); ctx.strokeRect(cropRect.x, cropRect.y, cropRect.w, cropRect.h); }
+  if(cropRect&&document.querySelector('#gridOverlay').checked){
+    const cols=Number(document.querySelector('#gridCols').value),rows=Number(document.querySelector('#gridRows').value);
+    if(cols>0&&cols<=160&&rows>0&&rows<=160){ctx.strokeStyle='#f4bd6388';ctx.lineWidth=1;ctx.beginPath();for(let c=1;c<cols;c++){const x=cropRect.x+cropRect.w*c/cols;ctx.moveTo(x,cropRect.y);ctx.lineTo(x,cropRect.y+cropRect.h);}for(let r=1;r<rows;r++){const y=cropRect.y+cropRect.h*r/rows;ctx.moveTo(cropRect.x,y);ctx.lineTo(cropRect.x+cropRect.w,y);}ctx.stroke();}
+  }
   if (footerRect) { ctx.strokeStyle = '#69e0d2'; ctx.lineWidth = Math.max(3, canvas.width / 500); ctx.strokeRect(footerRect.x, footerRect.y, footerRect.w, footerRect.h); }
+  if(cropTapAnchor){ctx.strokeStyle='#ff8b40';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(cropTapAnchor.x-15,cropTapAnchor.y);ctx.lineTo(cropTapAnchor.x+15,cropTapAnchor.y);ctx.moveTo(cropTapAnchor.x,cropTapAnchor.y-15);ctx.lineTo(cropTapAnchor.x,cropTapAnchor.y+15);ctx.stroke();}
 }
 function loadImageFile(file) {
   if (!file) return;
   const url = URL.createObjectURL(file);
   const image = new Image();
   image.onload = () => {
-    const scale = Math.min(1, 2400 / Math.max(image.naturalWidth, image.naturalHeight));
+    const scale = Math.min(1, 4096 / Math.max(image.naturalWidth, image.naturalHeight));
     const canvas = document.querySelector('#imageCanvas');
     canvas.width = Math.round(image.naturalWidth * scale);
     canvas.height = Math.round(image.naturalHeight * scale);
     sourceCanvas = document.createElement('canvas'); sourceCanvas.width = canvas.width; sourceCanvas.height = canvas.height;
     sourceCanvas.getContext('2d').drawImage(image, 0, 0, sourceCanvas.width, sourceCanvas.height);
-    sourceImage = image; cropRect = null; footerRect = null; recognitionDraft = null; selectionMode = 'board';
+    sourceImage = image; cropRect = null; footerRect = null; recognitionDraft = null; recognitionSamples = null; samplingLegendIndex = null; draftSelection = null; selectionMode = 'board';
+    document.querySelector('#recognitionPreview').hidden = true;
     document.querySelector('#imageStage').hidden = false;
     document.querySelector('#roiSelectors').hidden = false;
     document.querySelector('#recognitionFields').hidden = false;
     document.querySelector('#recognitionStatus').hidden = true;
     document.querySelector('#recognitionAudit').hidden = true;
     document.querySelector('#saveRecognized').hidden = true;
-    document.querySelector('#cropHelp').textContent = '拖动框选网格内侧边界';
+    cropTapAnchor=null;pointerStart=null;document.querySelector('#cropHelp').textContent = '先点网格内侧左上角，滚动图片后再点右下角；不要包含坐标';
     document.querySelector('#selectBoard').classList.add('selected');
     document.querySelector('#selectLegend').classList.remove('selected');
     document.querySelector('#patternName').value = file.name.replace(/\.[^.]+$/, '');
@@ -145,133 +160,102 @@ function loadImageFile(file) {
   image.onerror = () => { URL.revokeObjectURL(url); setRecognitionStatus('图片无法读取，请换一张 PNG 或 JPG。', true); };
   image.src = url;
 }
+
 async function getOcrWorker() {
-  if (ocrWorker) return ocrWorker;
   if (ocrWorkerPromise) return ocrWorkerPromise;
   ocrWorkerPromise = (async () => {
-    if (!window.Tesseract) await new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
-      script.onload = resolve; script.onerror = () => reject(new Error('OCR 组件加载失败，请检查网络后重试。'));
-      document.head.append(script);
-    });
-    const worker = await window.Tesseract.createWorker('eng', 1, {
-      workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
-      corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js',
-      langPath: 'https://tessdata.projectnaptha.com/4.0.0_best',
-      logger: item => { const bar=document.querySelector('#recognitionStatus progress');if(bar&&item.status==='recognizing text')bar.value=Math.round(item.progress*100); }
-    });
-    await worker.setParameters({ tessedit_pageseg_mode: '11', tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789()' });
+    const worker = new Worker('./ocr-worker.js');
     ocrWorker = worker;
+    worker.onmessage = ({data}) => {
+      const request=ocrRequests.get(data.id);if(!request)return;ocrRequests.delete(data.id);
+      if(data.error)request.reject(new Error(data.error));else request.resolve(data.result);
+    };
+    worker.onerror = () => {
+      for(const request of ocrRequests.values())request.reject(new Error('识别引擎未能启动，请更新浏览器或检查网络后重试。'));
+      ocrRequests.clear();worker.terminate();ocrWorker=null;ocrWorkerPromise=null;
+    };
+    await sendOcrRequest(null);
     return worker;
   })();
-  try { return await ocrWorkerPromise; } catch (error) { ocrWorkerPromise = null; throw error; }
+  try{return await ocrWorkerPromise;}catch(error){ocrWorker?.terminate();ocrWorker=null;ocrWorkerPromise=null;throw error;}
 }
-function makeFooterOcrCanvas(rect) {
-  const scale = 4;
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.round(rect.w * scale); canvas.height = Math.round(rect.h * scale);
-  canvas.getContext('2d').drawImage(sourceCanvas, rect.x, rect.y, rect.w, rect.h, 0, 0, canvas.width, canvas.height);
-  return { canvas, scale };
+function sendOcrRequest(image) {
+  return new Promise((resolve,reject)=>{const id=++ocrSequence;ocrRequests.set(id,{resolve,reject});ocrWorker.postMessage({id,image});});
 }
-function rgbToLab(rgb) {
-  let [r,g,b] = rgb.map(value => value / 255).map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
-  let x=(r*0.4124+g*0.3576+b*0.1805)/0.95047;
-  let y=(r*0.2126+g*0.7152+b*0.0722);
-  let z=(r*0.0193+g*0.1192+b*0.9505)/1.08883;
-  const f=value=>value>0.008856?Math.cbrt(value):7.787*value+16/116;
-  x=f(x);y=f(y);z=f(z);
-  return [116*y-16,500*(x-y),200*(y-z)];
-}
-function labDistance(a,b) { return Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]); }
-function pixelMedian(imageData, cx, cy, rx, ry) {
-  const channels=[[],[],[]]; const x0=Math.max(0,Math.floor(cx-rx)); const x1=Math.min(imageData.width-1,Math.ceil(cx+rx));
-  const y0=Math.max(0,Math.floor(cy-ry)); const y1=Math.min(imageData.height-1,Math.ceil(cy+ry));
-  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const i=(y*imageData.width+x)*4;for(let c=0;c<3;c++)channels[c].push(imageData.data[i+c]);}
-  return channels.map(values=>{values.sort((a,b)=>a-b);return values[Math.floor(values.length/2)]||0;});
-}
-function readLegend(words, rect, scale, imageData) {
-  const wordsInRoi=(words||[]).filter(word=>word.confidence>18).map(word=>{const raw=word.text.toUpperCase();const code=raw.match(/[A-Z]\d{1,2}/)?.[0]||'';const inlineCount=raw.match(/[([{]\s*([0-9]{1,5})\s*[)\]}]/)?.[1];const number=raw.match(/\d{1,5}/)?.[0]||'';return {word,x:rect.x+(word.bbox.x0+word.bbox.x1)/(2*scale),y:rect.y+(word.bbox.y0+word.bbox.y1)/(2*scale),code,number:!code&&number?number:'',inlineCount};});
-  const codeWords=wordsInRoi.filter(item=>colorMap.has(item.code));
-  const numbers=wordsInRoi.filter(item=>item.number);
-  const legend=[]; const counts={};
-  for(const item of codeWords){
-    const nearest=numbers.map(number=>({...number,dx:Math.abs(number.x-item.x),dy:number.y-item.y})).filter(number=>number.dx<Math.max(100,rect.w*0.22)&&number.dy>-12&&number.dy<Math.max(80,rect.h*0.6)).sort((a,b)=>a.dx+a.dy*1.2-(b.dx+b.dy*1.2))[0];
-    const entry={code:item.code,rgb:null,lab:null,count:item.inlineCount?Number(item.inlineCount):nearest?Number(nearest.number):null};
-    if(!legend.some(existing=>existing.code===entry.code)){legend.push(entry);if(entry.count!==null)counts[entry.code]=entry.count;}
+function sourcePixels(){return sourceCanvas.getContext('2d',{willReadFrequently:true}).getImageData(0,0,sourceCanvas.width,sourceCanvas.height);}
+function updateRecognitionDraft(reclassify=true) {
+  if(!recognitionDraft)return;
+  if(reclassify&&recognitionSamples){
+    const result=ChartRecognizer.classifySamples(recognitionSamples,recognitionDraft.legend);
+    recognitionDraft.cells=result.cells;recognitionDraft.issues=result.issues;
+    for(const [index,code] of Object.entries(recognitionDraft.autoOverrides||{}))if(code==='?'||recognitionDraft.legend.some(c=>c.code===code))recognitionDraft.cells[Number(index)]=code;
+    for(const [index,code] of Object.entries(recognitionDraft.overrides||{}))recognitionDraft.cells[Number(index)]=code;
   }
-  return {legend,counts};
-}
-function classifyGrid(rect, rows, cols, legend) {
-  const imageData=sourceCanvas.getContext('2d',{willReadFrequently:true}).getImageData(0,0,sourceCanvas.width,sourceCanvas.height);
-  const cells=[];const cellW=rect.w/cols;const cellH=rect.h/rows;
-  const patch=Math.max(1,Math.round(Math.min(cellW,cellH)*0.045));
-  for(let row=0;row<rows;row++)for(let col=0;col<cols;col++){
-    const x=rect.x+col*cellW;const y=rect.y+row*cellH;
-    const backgroundSamples=[[.28,.28],[.72,.28],[.28,.72],[.72,.72]].map(([fx,fy])=>pixelMedian(imageData,x+cellW*fx,y+cellH*fy,patch,patch));
-    const rgb=[0,1,2].map(channel=>Math.round(backgroundSamples.reduce((sum,sample)=>sum+sample[channel],0)/4));
-    const lab=rgbToLab(rgb);const center=imageData;let ink=0,total=0;
-    const x0=Math.max(0,Math.floor(x+cellW*.27));const x1=Math.min(center.width,Math.ceil(x+cellW*.73));
-    const y0=Math.max(0,Math.floor(y+cellH*.27));const y1=Math.min(center.height,Math.ceil(y+cellH*.73));
-    for(let py=y0;py<y1;py+=2)for(let px=x0;px<x1;px+=2){const i=(py*center.width+px)*4;const delta=Math.hypot(center.data[i]-rgb[0],center.data[i+1]-rgb[1],center.data[i+2]-rgb[2]);if(delta>65)ink++;total++;}
-    const hasLabel=ink/Math.max(1,total)>0.018;
-    const matches=legend.filter(item=>item.lab).map(item=>({...item,distance:labDistance(lab,item.lab)})).sort((a,b)=>a.distance-b.distance);
-    const best=matches[0];const gap=matches[1]?matches[1].distance-best.distance:100;
-    if(!hasLabel){cells.push(null);continue;}
-    if(!best){cells.push('?');continue;}
-    cells.push(best.distance>42||gap<1.5?'?':best.code);
-  }
-  return cells;
-}
-function updateRecognitionDraft() {
-  if (!recognitionDraft?.boardRect) return;
-  recognitionDraft.cells = classifyGrid(recognitionDraft.boardRect, recognitionDraft.height, recognitionDraft.width, recognitionDraft.legend);
-  recognitionDraft.footerCounts = Object.fromEntries(recognitionDraft.legend.filter(item => item.count !== null).map(item => [item.code, item.count]));
-  renderRecognitionAudit(recognitionDraft);
+  recognitionDraft.footerCounts=Object.fromEntries(recognitionDraft.legend.filter(item=>colorMap.has(item.code)&&item.count!==null).map(item=>[item.code,item.count]));
+  renderRecognitionAudit(recognitionDraft);renderRecognitionPreview();
 }
 function renderRecognitionAudit(pattern) {
-  const host = document.querySelector('#recognitionAudit');
-  const cellCounts = countPattern(pattern);
-  const footerCounts = pattern.footerCounts || {};
-  const codes = [...new Set([...Object.keys(cellCounts), ...Object.keys(footerCounts)])].sort((a,b)=>a.localeCompare(b));
-  host.hidden = false;
-  const recognized = pattern.cells.filter(code => colorMap.has(code)).length;
-  const occupied = pattern.cells.filter(code => code !== null).length;
-  const discrepancies = codes.filter(code => footerCounts[code] !== undefined && (cellCounts[code] || 0) !== footerCounts[code]);
-  const colorRows=(pattern.legend||[]).map((item,index)=>`<div class="legend-edit-row" data-legend-index="${index}"><i class="legend-swatch" style="background:${item.rgb?`rgb(${item.rgb.join(',')})`:colorMap.get(item.code)?.color||'#fff'}"></i><select data-legend-code>${palette.map(({code})=>`<option value="${code}" ${code===item.code?'selected':''}>${code}</option>`).join('')}</select><label>数量<input data-legend-count type="number" min="0" step="1" value="${item.count??''}" placeholder="未读"></label><button type="button" data-sample-color="${item.code}" class="secondary-button">${samplingLegendCode===item.code?'点击图中取色':'取色'}</button><button type="button" data-remove-legend="${index}" aria-label="移除 ${item.code}">×</button></div>`).join('');
-  const known=new Set((pattern.legend||[]).map(item=>item.code));
-  host.innerHTML = `<strong>读出 ${recognized}/${occupied} 个有豆格，${pattern.cells.length-occupied} 个空格</strong>${Object.keys(footerCounts).length ? `<span> · 底部统计已读 ${Object.keys(footerCounts).length} 色</span>` : '<span> · 未读到底部统计，可按网格结果继续校对</span>'}${discrepancies.length ? `<span class="audit-chip mismatch">${discrepancies.length} 色数量不一致，请检查</span>` : ''}${codes.map(code => `<span class="audit-chip ${footerCounts[code] !== undefined && (cellCounts[code] || 0) !== footerCounts[code] ? 'mismatch' : ''}">${code} ${cellCounts[code] || 0}${footerCounts[code] !== undefined ? ` / ${footerCounts[code]}` : ''}</span>`).join('')}<section class="legend-editor"><strong>校对底部色号与色块</strong><p>确认色号和数量；颜色不准时点“修正色块”，再点击原图对应的色块。</p>${colorRows}<div class="legend-add"><select id="addLegendCode">${palette.filter(({code})=>!known.has(code)).map(({code})=>`<option value="${code}">${code}</option>`).join('')}</select><button type="button" class="secondary-button" id="addLegend">补充色号</button></div></section>`;
+  const host=document.querySelector('#recognitionAudit'),counts=countPattern(pattern);
+  const unknown=pattern.cells.filter(code=>code==='?').length;
+  const occupied=pattern.cells.filter(code=>code!==null).length;
+  const unresolved=pattern.legend.some((item,i)=>!colorMap.has(item.code)||item.count===null||pattern.legend.some((other,j)=>j!==i&&other.code===item.code));
+  const mismatch=pattern.legend.filter(item=>item.code&&item.count!==null&&(counts[item.code]||0)!==item.count).length;
+  host.hidden=false;
+  host.innerHTML=`<strong>网格 ${pattern.width} × ${pattern.height} · 有豆 ${occupied} 格 · 待校对 ${unknown} 格</strong><p>图例读到 ${pattern.legend.length} 个色块；${mismatch?`${mismatch} 色数量不一致，请对照原图`:'已读出的数量与网格吻合'}。数量仅用于对账，不会强行改格子凑数。</p><section class="legend-editor"><h3>底部统计校对</h3><p>左侧保留原图色块，右侧可修正色号或数量。取色只用于纠正个别样本。</p><div class="legend-table-head"><span>原图</span><span>色号</span><span>图例颗数</span><span>网格颗数</span><span>校对</span></div>${pattern.legend.map((item,index)=>`<div class="legend-edit-row ${(item.count!==null&&(counts[item.code]||0)!==item.count)||!item.code?'mismatch':''}" data-legend-index="${index}"><canvas data-legend-source="${index}" width="150" height="52" aria-label="图例 ${index+1} 原图"></canvas><select data-legend-code aria-label="图例 ${index+1} 色号"><option value="">未读出</option>${palette.map(({code})=>`<option value="${code}" ${code===item.code?'selected':''}>${code}</option>`).join('')}</select><input data-legend-count aria-label="${item.code||'未读色号'} 图例数量" type="number" min="0" step="1" value="${item.count??''}" placeholder="未读"><strong>${counts[item.code]||0}</strong><div class="legend-row-actions"><button type="button" data-sample-index="${index}" class="secondary-button">${samplingLegendIndex===index?'取消取色':'取色'}</button><button type="button" data-remove-legend="${index}" aria-label="移除图例 ${index+1}">×</button></div>${item.recoveredFromCells?'<small>色号已用同色格文字复核</small>':''}</div>`).join('')}<div class="legend-add"><select id="addLegendCode" aria-label="补充色号">${palette.filter(({code})=>!pattern.legend.some(item=>item.code===code)).map(({code})=>`<option value="${code}">${code}</option>`).join('')}</select><button type="button" class="secondary-button" id="addLegend">补充色号</button></div></section>`;
+  host.querySelectorAll('[data-legend-source]').forEach(canvas=>{
+    const item=pattern.legend[Number(canvas.dataset.legendSource)],ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
+    if(item.rect){const r=item.rect,h=item.countRect?item.countRect.y+item.countRect.h-r.y:r.h;const scale=Math.min(canvas.width/r.w,canvas.height/h);ctx.drawImage(sourceCanvas,r.x,r.y,r.w,h,0,0,r.w*scale,h*scale);}else{ctx.fillStyle=item.rgb?`rgb(${item.rgb.join(',')})`:'#eee';ctx.fillRect(0,0,canvas.width,canvas.height);}
+  });
+  const save=document.querySelector('#saveRecognized');save.hidden=false;save.disabled=unresolved;
+  save.textContent=unresolved?'先补齐图例色号和数量':unknown||mismatch?'保存待校对图纸':'确认并保存图纸';
+}
+function renderRecognitionPreview() {
+  const host=document.querySelector('#recognitionPreview');
+  if(!recognitionDraft){host.hidden=true;return;}
+  const prior=host.querySelector('.draft-scroll'),position=prior?{left:prior.scrollLeft,top:prior.scrollTop}:null;
+  const pattern=recognitionDraft;host.hidden=false;
+  const unknown=pattern.cells.map((code,i)=>code==='?'?i:-1).filter(i=>i>=0);
+  host.innerHTML=`<h3>网格预览与逐格校对</h3><p>点击格子查看原图局部并改色；红色问号表示没有足够证据确定色号。</p><div class="editor-tools"><label>高亮 <select id="draftHighlight"><option value="all">全部</option><option value="?" ${draftHighlight==='?'?'selected':''}>待校对格</option>${pattern.legend.filter(c=>c.code).map(c=>`<option value="${c.code}" ${draftHighlight===c.code?'selected':''}>${c.code}</option>`).join('')}</select></label><button id="nextDraftUnknown" class="secondary-button" ${unknown.length?'':'disabled'}>定位待校对格（${unknown.length}）</button></div><div class="pattern-scroll draft-scroll">${gridMarkup(pattern,{mode:'draft',chosen:draftHighlight,size:26})}</div><div id="draftCellDetail"></div>`;
+  host.querySelector('#draftHighlight').onchange=event=>{draftHighlight=event.target.value;renderRecognitionPreview();};
+  host.querySelector('#nextDraftUnknown').onclick=()=>{draftSelection=unknown.find(i=>i>(draftSelection??-1))??unknown[0];renderDraftCellDetail();host.querySelector(`[data-draftcell="${draftSelection}"]`)?.scrollIntoView({block:'nearest',inline:'center'});};
+  if(position){const scroll=host.querySelector('.draft-scroll');scroll.scrollLeft=position.left;scroll.scrollTop=position.top;}
+  renderDraftCellDetail();
+}
+function renderDraftCellDetail(){
+  const host=document.querySelector('#draftCellDetail');if(!host||draftSelection===null||!recognitionDraft)return;
+  const p=recognitionDraft,index=draftSelection,code=p.cells[index],row=Math.floor(index/p.width),col=index%p.width;
+  host.innerHTML=`<div class="draft-cell-detail"><canvas id="draftSourceCell" width="160" height="160" aria-label="所选格的原图局部"></canvas><div><strong>第 ${row+1} 行，第 ${col+1} 列</strong><p>当前：${code==='?'?'待校对':code||'空格'}</p><label>改为 <select id="draftPaint"><option value="">空格</option>${p.legend.filter(c=>c.code).map(c=>`<option value="${c.code}" ${c.code===code?'selected':''}>${c.code}</option>`).join('')}</select></label><button id="applyDraftPaint" class="primary-button">修正这一格</button><button id="resetDraftPaint" class="text-button">恢复自动结果</button></div></div>`;
+  const r=p.boardRect,cw=r.w/p.width,ch=r.h/p.height,canvas=host.querySelector('canvas'),ctx=canvas.getContext('2d');ctx.imageSmoothingEnabled=false;ctx.drawImage(sourceCanvas,r.x+col*cw,r.y+row*ch,cw,ch,0,0,160,160);
+  host.querySelector('#applyDraftPaint').onclick=()=>{p.overrides={...p.overrides,[index]:host.querySelector('#draftPaint').value||null};updateRecognitionDraft();};
+  host.querySelector('#resetDraftPaint').onclick=()=>{if(p.overrides)delete p.overrides[index];updateRecognitionDraft();};
+}
+function invalidateRecognition(){
+  if(!recognitionDraft)return;
+  recognitionDraft=null;recognitionSamples=null;samplingLegendIndex=null;draftSelection=null;
+  document.querySelector('#recognitionAudit').hidden=true;document.querySelector('#recognitionPreview').hidden=true;document.querySelector('#saveRecognized').hidden=true;
+  setRecognitionStatus('网格范围或行列数已改变，请重新识别。');
 }
 async function recognizeImage() {
-  const cols = Number(document.querySelector('#gridCols').value);
-  const rows = Number(document.querySelector('#gridRows').value);
-  const boardRect=cropRect&&{...cropRect};const legendRect=footerRect&&{...footerRect};
-  if (!sourceCanvas || !boardRect || !legendRect) return setRecognitionStatus('请分别框选图纸网格和底部色号统计区域。', true);
-  if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols < 1 || rows < 1 || cols > 160 || rows > 160) return setRecognitionStatus('请输入有效的行数和列数（1 到 160）。', true);
-  if (boardRect.w / cols < 8 || boardRect.h / rows < 8) return setRecognitionStatus('选中的网格区域太小，请放大图片或重新框选。', true);
-  const status = document.querySelector('#recognitionStatus');
-  const recognizeButton = document.querySelector('#recognizePattern');
-  recognizeButton.disabled = true;
-  document.querySelector('#patternImage').disabled = true;
-  document.querySelector('#selectBoard').disabled = true;
-  document.querySelector('#selectLegend').disabled = true;
-  status.hidden = false; status.classList.remove('error'); status.innerHTML = `${ocrWorker?'正在读取底部色号…':'正在启动 OCR 引擎…'}<progress max="100" value="0"></progress>`;
-  try {
-    const worker = await getOcrWorker();
-    const { canvas, scale } = makeFooterOcrCanvas(legendRect);
-    const footerResult = await worker.recognize(canvas);
-    const sourcePixels=sourceCanvas.getContext('2d',{willReadFrequently:true}).getImageData(0,0,sourceCanvas.width,sourceCanvas.height);
-    const { legend, counts: footerCounts } = readLegend(footerResult.data.words || [], legendRect, scale, sourcePixels);
-    setRecognitionStatus(legend.length ? `已读取 ${legend.length} 个色号，正在按色块匹配 ${rows * cols} 个格子…` : '没有读到底部色号，可在校对区手动补充。正在展开网格…');
-    const cells = classifyGrid(boardRect, rows, cols, legend);
-    recognitionDraft = { id: crypto.randomUUID(), name: document.querySelector('#patternName').value.trim() || `图纸 ${state.patterns.length + 1}`, width: cols, height: rows, cells, done: {}, footerCounts, legend, boardRect, source: 'image' };
-    renderRecognitionAudit(recognitionDraft);
-    document.querySelector('#saveRecognized').hidden = false;
-    setRecognitionStatus(legend.length ? '初步识别完成。请先校对底部色号和数量，再逐个点“取色”校准；红色格子表示待匹配。' : '未读到色号。请在下方手动补充色号和数量，再逐个点“取色”校准。');
-    document.querySelector('#recognitionAudit').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  } catch (error) {
-    setRecognitionStatus(error.message || '识别失败，请重新选择图片或稍后重试。', true);
-  } finally { recognizeButton.disabled = false;document.querySelector('#patternImage').disabled=false;document.querySelector('#selectBoard').disabled=false;document.querySelector('#selectLegend').disabled=false; }
+  const cols=Number(document.querySelector('#gridCols').value),rows=Number(document.querySelector('#gridRows').value);
+  const board=cropRect&&{...cropRect},footer=footerRect&&{...footerRect};
+  if(!sourceCanvas||!board||!footer)return setRecognitionStatus('请分别框选网格内侧和底部统计，网格不要包含坐标行列。',true);
+  if(!Number.isInteger(cols)||!Number.isInteger(rows)||cols<1||rows<1||cols>160||rows>160)return setRecognitionStatus('请输入 1 到 160 之间的行列数。',true);
+  const controls=['#recognizePattern','#patternImage','#selectBoard','#selectLegend','#gridCols','#gridRows'];controls.forEach(id=>document.querySelector(id).disabled=true);
+  recognitionDraft=null;recognitionSamples=null;samplingLegendIndex=null;draftSelection=null;draftHighlight='all';
+  document.querySelector('#recognitionAudit').hidden=true;document.querySelector('#recognitionPreview').hidden=true;document.querySelector('#saveRecognized').hidden=true;
+  const started=performance.now();
+  try{
+    setRecognitionStatus(ocrWorker?'正在准备图例识别…':'首次加载识别引擎和模型（约 22 MB），之后可使用本机缓存…');
+    await getOcrWorker();
+    const result=await ChartRecognitionFlow.recognize(sourcePixels(),board,rows,cols,footer,sendOcrRequest,{onProgress:setRecognitionStatus,validCode:code=>colorMap.has(code)});
+    recognitionSamples=result.samples;
+    recognitionDraft={id:crypto.randomUUID(),name:document.querySelector('#patternName').value.trim()||`图纸 ${state.patterns.length+1}`,width:cols,height:rows,cells:result.cells,done:{},footerCounts:result.footerCounts,legend:result.legend,boardRect:board,issues:result.issues,autoOverrides:result.autoOverrides,verificationDetails:result.verificationDetails,source:'image'};
+    updateRecognitionDraft(false);
+    const unknown=result.cells.filter(code=>code==='?').length;
+    setRecognitionStatus(`识别用时 ${((performance.now()-started)/1000).toFixed(1)} 秒，读到 ${result.legend.length} 个图例色块。${unknown?`${unknown} 格待校对，可在预览中定位。`:'请对照底部统计和原图检查后保存。'}`);
+    document.querySelector('#recognitionAudit').scrollIntoView({behavior:'smooth',block:'start'});
+  }catch(error){setRecognitionStatus(error.message||'识别失败，请重试。',true);}
+  finally{controls.forEach(id=>document.querySelector(id).disabled=false);}
 }
 function renderEditor(id) {
   const pattern = state.patterns.find(item => item.id === id);
@@ -281,7 +265,7 @@ function renderEditor(id) {
   const counts = countPattern(pattern);
   const unknown = pattern.cells.filter(code => code === '?').length;
   const shortages = Object.entries(counts).filter(([code, count]) => count > Number(state.stock[code] || 0));
-  const options = palette.map(({code}) => `<option value="${code}" ${code===selectedEditColor?'selected':''}>${code}</option>`).join('');
+  const options = `<option value="" ${selectedEditColor===''?'selected':''}>空格（擦除）</option>`+palette.map(({code}) => `<option value="${code}" ${code===selectedEditColor?'selected':''}>${code}</option>`).join('');
   const footerMismatch = Object.entries(pattern.footerCounts || {}).filter(([code,count]) => (counts[code] || 0) !== count).length;
   const warning = unknown ? `<p class="pattern-warning">${unknown} 个有豆格未读出色号，修正后再开始拼。</p>` : footerMismatch ? `<p class="pattern-warning">${footerMismatch} 个色号的网格统计与图纸底部统计不同，请核对。</p>` : shortages.length ? `<p class="pattern-warning">${shortages.length} 个色号库存不足。</p>` : '';
   editor.innerHTML = `<div class="editor-head"><div><h2>${esc(pattern.name)}</h2><p>${pattern.width} × ${pattern.height} 格 · ${unknown ? `${unknown} 格待校对` : shortages.length ? `${shortages.length} 色库存不足` : '库存充足'}</p></div><button class="text-button" id="closeEditor">收起</button></div>
@@ -314,9 +298,9 @@ function exportPatternImage(pattern) {
   ctx.font = '10px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   pattern.cells.forEach((code,index) => {
     const x = margin + index % pattern.width * size; const y = margin + Math.floor(index / pattern.width) * size;
-    ctx.fillStyle = colorMap.get(code)?.color || (code === '?' ? '#f1d4cd' : '#fff'); ctx.fillRect(x,y,size,size);
+    ctx.fillStyle = patternColor(pattern,code); ctx.fillRect(x,y,size,size);
     ctx.strokeStyle = '#68716d'; ctx.lineWidth = 0.5; ctx.strokeRect(x,y,size,size);
-    ctx.fillStyle = '#18211d'; if (size >= 22) ctx.fillText(code,x+size/2,y+size/2);
+    ctx.fillStyle = patternTextColor(pattern,code); if (size >= 22) ctx.fillText(code,x+size/2,y+size/2);
   });
   ctx.fillStyle = '#202725'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(`${pattern.name} · ${pattern.width} × ${pattern.height}`, 3, 15);
   const link = document.createElement('a'); link.download = `${pattern.name}.png`; link.href = canvas.toDataURL('image/png'); link.click();
@@ -335,14 +319,15 @@ function renderWork() {
   const chosen = currentWorkColor === 'all' ? 'all' : currentWorkColor;
   const unknown = pattern.cells.filter(code => code === '?').length;
   const insufficient = Object.entries(counts).some(([code,count]) => count > Number(state.stock[code] || 0));
-  const finishLabel = pattern.consumed ? '库存已扣减' : unknown ? '先修正未识别格' : insufficient ? '库存不足，先调整' : '完成并扣库存';
+  const mismatch=Object.entries(pattern.footerCounts||{}).some(([code,count])=>(counts[code]||0)!==count);
+  const finishLabel = pattern.consumed ? '库存已扣减' : unknown ? '先修正未识别格' : mismatch ? '先校对图例用量' : insufficient ? '库存不足，先调整' : '完成并扣库存';
   const activeCount = chosen === 'all' ? total : counts[chosen] || 0;
   const activeDone = chosen === 'all' ? complete : Object.entries(pattern.done || {}).filter(([index,done]) => done && pattern.cells[Number(index)] === chosen).length;
-  host.innerHTML = `<div class="work-summary"><h2>${esc(pattern.name)}</h2><select id="workPattern">${state.patterns.map(p=>`<option value="${p.id}" ${p.id===pattern.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select></div>${unknown ? `<p class="pattern-warning">${unknown} 个有豆格的色号未识别，点击“编辑”修正后才能完成库存扣减。</p>` : ''}<div class="work-stats"><span>已完成 <strong>${complete}</strong> / ${total}</span><span>${Math.round(complete/Math.max(total,1)*100)}%</span><button class="text-button" id="finishWork" ${pattern.consumed||insufficient||unknown?'disabled':''}>${finishLabel}</button></div><div class="work-color-summary"><i class="color-swatch" style="height:20px;width:26px;margin:0;background:${chosen==='all'?'#e2f1ea':colorMap.get(chosen)?.color}"></i><span>${chosen==='all'?'全部色号':`当前色号 ${chosen}`}</span><strong>${activeDone} / ${activeCount}</strong><span>已拼</span></div><div class="editor-tools"><label>当前色号 <select id="workColor"><option value="all">显示全部</option>${colors.map(code=>`<option value="${code}" ${chosen===code?'selected':''}>${code} · ${counts[code]} 颗 · 库存 ${fmt(state.stock[code])}</option>`).join('')}</select></label><button class="secondary-button" id="nextCell">标记下一个${chosen==='all'?'':' '+chosen}格</button><label class="tool-group">缩放 <input id="workZoom" type="range" min="12" max="36" step="2" value="${cellSize}"><span class="zoom-value">${cellSize}px</span></label></div><div class="pattern-scroll">${gridMarkup(pattern, { mode: 'work', chosen })}</div>`;
+  host.innerHTML = `<div class="work-summary"><h2>${esc(pattern.name)}</h2><select id="workPattern">${state.patterns.map(p=>`<option value="${p.id}" ${p.id===pattern.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select></div>${unknown ? `<p class="pattern-warning">${unknown} 个有豆格的色号未识别，点击“编辑”修正后才能完成库存扣减。</p>` : ''}<div class="work-stats"><span>已完成 <strong>${complete}</strong> / ${total}</span><span>${Math.round(complete/Math.max(total,1)*100)}%</span><button class="text-button" id="finishWork" ${pattern.consumed||insufficient||unknown||mismatch?'disabled':''}>${finishLabel}</button></div><div class="work-color-summary"><i class="color-swatch" style="height:20px;width:26px;margin:0;background:${chosen==='all'?'#e2f1ea':colorMap.get(chosen)?.color}"></i><span>${chosen==='all'?'全部色号':`当前色号 ${chosen}`}</span><strong>${activeDone} / ${activeCount}</strong><span>已拼</span></div><div class="editor-tools"><label>当前色号 <select id="workColor"><option value="all">显示全部</option>${colors.map(code=>`<option value="${code}" ${chosen===code?'selected':''}>${code} · ${counts[code]} 颗 · 库存 ${fmt(state.stock[code])}</option>`).join('')}</select></label><button class="secondary-button" id="nextCell">标记下一个${chosen==='all'?'':' '+chosen}格</button><label class="tool-group">缩放 <input id="workZoom" type="range" min="12" max="36" step="2" value="${cellSize}"><span class="zoom-value">${cellSize}px</span></label></div><div class="pattern-scroll">${gridMarkup(pattern, { mode: 'work', chosen })}</div>`;
   host.querySelector('#workPattern').onchange = e => { state.activePattern = e.target.value; currentWorkColor = 'all'; persist(); renderWork(); };
   host.querySelector('#workColor').onchange = e => { currentWorkColor = e.target.value; renderWork(); };
   host.querySelector('#nextCell').onclick = () => { const idx=pattern.cells.findIndex((code,i)=> colorMap.has(code)&&(chosen==='all'||code===chosen)&&!pattern.done?.[i]); if(idx>=0){pattern.done={...pattern.done,[idx]:true};persist();renderWork();} };
-  if(!pattern.consumed&&!insufficient) host.querySelector('#finishWork').onclick = () => confirmDialog('完成图纸并扣减库存', `<p class="notice">将按图纸用量从库存扣减 ${fmt(total)} 颗。此操作只能执行一次。</p>`, () => { Object.entries(counts).forEach(([code,count])=>state.stock[code]=Number(state.stock[code]||0)-count); pattern.consumed=true; persist(); renderWork(); renderInventory(); });
+  if(!pattern.consumed&&!insufficient&&!unknown&&!mismatch) host.querySelector('#finishWork').onclick = () => confirmDialog('完成图纸并扣减库存', `<p class="notice">将按图纸用量从库存扣减 ${fmt(total)} 颗。此操作只能执行一次。</p>`, () => { Object.entries(counts).forEach(([code,count])=>state.stock[code]=Number(state.stock[code]||0)-count); pattern.consumed=true; persist(); renderWork(); renderInventory(); });
 }
 function confirmDialog(title, content, action) {
   const dialog = document.querySelector('#confirmDialog');
@@ -382,28 +367,27 @@ document.querySelector('#workArea').addEventListener('click', event => {
 });
 document.querySelector('#patternImage').addEventListener('change', event => loadImageFile(event.target.files?.[0]));
 document.querySelector('#recognizePattern').onclick = recognizeImage;
-document.querySelector('#recognitionAudit').addEventListener('click', event => {
-  const sample=event.target.closest('[data-sample-color]');
-  if(sample){samplingLegendCode=sample.dataset.sampleColor;renderRecognitionAudit(recognitionDraft);setRecognitionStatus(`请点击原图中 ${samplingLegendCode} 对应的纯色方块区域取样。`);document.querySelector('#imageStage').scrollIntoView({behavior:'smooth',block:'center'});return;}
-  const remove=event.target.closest('[data-remove-legend]');
-  if(remove){recognitionDraft.legend.splice(Number(remove.dataset.removeLegend),1);updateRecognitionDraft();return;}
-  if(event.target.id==='addLegend'){
-    const code=document.querySelector('#addLegendCode')?.value;if(!code)return;
-    recognitionDraft.legend.push({code,count:null,rgb:null,lab:null});updateRecognitionDraft();
-  }
+
+document.querySelector('#recognitionPreview').addEventListener('click',event=>{const cell=event.target.closest('[data-draftcell]');if(cell){draftSelection=Number(cell.dataset.draftcell);renderDraftCellDetail();}});
+document.querySelector('#recognitionAudit').addEventListener('click',event=>{
+  if(!recognitionDraft)return;
+  const sample=event.target.closest('[data-sample-index]');
+  if(sample){const i=Number(sample.dataset.sampleIndex);samplingLegendIndex=samplingLegendIndex===i?null:i;renderRecognitionAudit(recognitionDraft);if(samplingLegendIndex!==null){document.querySelector('#cropHelp').textContent=`点击 ${recognitionDraft.legend[i].code||'对应色号'} 的纯色底色，避开文字`;setRecognitionStatus('点击原图色块的空白部分取样；再次点击“取消取色”退出。');document.querySelector('#imageStage').scrollIntoView({behavior:'smooth',block:'center'});}return;}
+  const remove=event.target.closest('[data-remove-legend]');if(remove){recognitionDraft.legend.splice(Number(remove.dataset.removeLegend),1);samplingLegendIndex=null;updateRecognitionDraft();return;}
+  if(event.target.id==='addLegend'){const code=document.querySelector('#addLegendCode')?.value;if(code){recognitionDraft.legend.push({code,count:null,rgb:null});updateRecognitionDraft();}}
 });
-document.querySelector('#recognitionAudit').addEventListener('change', event => {
+document.querySelector('#recognitionAudit').addEventListener('change',event=>{
   const row=event.target.closest('[data-legend-index]');if(!row||!recognitionDraft)return;
   const entry=recognitionDraft.legend[Number(row.dataset.legendIndex)];if(!entry)return;
-  if(event.target.matches('[data-legend-code]'))entry.code=event.target.value;
+  if(event.target.matches('[data-legend-code]')){if(event.target.value&&recognitionDraft.legend.some(item=>item!==entry&&item.code===event.target.value)){setRecognitionStatus('这个色号已经存在，请先检查是否重复识别。',true);renderRecognitionAudit(recognitionDraft);return;}entry.code=event.target.value||null;samplingLegendIndex=null;}
   if(event.target.matches('[data-legend-count]'))entry.count=event.target.value===''?null:Math.max(0,Math.floor(Number(event.target.value)||0));
   updateRecognitionDraft();
 });
 document.querySelector('#saveRecognized').onclick = () => {
-  if (!recognitionDraft) return;
+  if (!recognitionDraft || document.querySelector('#saveRecognized').disabled) return;
   const pattern = recognitionDraft;
   state.patterns.unshift(pattern); state.activePattern = pattern.id; persist();
-  recognitionDraft = null; editPatternId = pattern.id; renderPatterns(); renderEditor(pattern.id);
+  recognitionDraft = null; recognitionSamples = null; samplingLegendIndex = null; document.querySelector('#recognitionAudit').hidden = true; document.querySelector('#recognitionPreview').hidden = true; editPatternId = pattern.id; renderPatterns(); renderEditor(pattern.id);
   document.querySelector('#saveRecognized').hidden = true;
   document.querySelector('#recognitionStatus').hidden = true;
   setRecognitionStatus('图纸已保存。可在网格中校对，或进入拼制模式。');
@@ -418,20 +402,35 @@ function updateCrop(point) {
   if(selectionMode==='board')cropRect=rect;else footerRect=rect;
   drawImageCanvas();
 }
-imageCanvas.addEventListener('pointerdown', event => {
-  if (!sourceImage) return;
+
+imageCanvas.addEventListener('pointerdown',event=>{
+  if(!sourceImage||document.querySelector('#recognizePattern').disabled)return;
   const point=canvasPoint(event);
-  if(samplingLegendCode&&recognitionDraft){
-    const entry=recognitionDraft.legend.find(item=>item.code===samplingLegendCode);
-    if(entry){const pixels=sourceCanvas.getContext('2d',{willReadFrequently:true}).getImageData(0,0,sourceCanvas.width,sourceCanvas.height);entry.rgb=pixelMedian(pixels,point.x,point.y,3,3);entry.lab=rgbToLab(entry.rgb);samplingLegendCode=null;updateRecognitionDraft();setRecognitionStatus('色块样本已更新，网格已重新匹配。');}
-    return;
+  pointerStart={x:event.clientX,y:event.clientY};
+  if(document.querySelector('#cropMethod').value==='tap')return;
+  if(samplingLegendIndex!==null&&recognitionDraft){
+    const entry=recognitionDraft.legend[samplingLegendIndex];if(entry){entry.rgb=ChartRecognizer.dominant(ChartRecognizer.pixels(sourcePixels(),{x:point.x-2,y:point.y-2,w:5,h:5}));samplingLegendIndex=null;updateRecognitionDraft();setRecognitionStatus('色块样本已更新，网格已重新匹配。');}return;
   }
-  imageCanvas.setPointerCapture(event.pointerId); cropDrag = point; updateCrop(cropDrag);
+  invalidateRecognition();imageCanvas.setPointerCapture(event.pointerId);cropDrag=point;updateCrop(cropDrag);
 });
 imageCanvas.addEventListener('pointermove', event => { if (cropDrag) updateCrop(canvasPoint(event)); });
-imageCanvas.addEventListener('pointerup', event => { if (!cropDrag) return; updateCrop(canvasPoint(event)); const rect=selectionMode==='board'?cropRect:footerRect;cropDrag=null;if(rect.w<20||rect.h<20){if(selectionMode==='board')cropRect=null;else footerRect=null;}drawImageCanvas(); });
-document.querySelector('#selectBoard').onclick = () => { selectionMode='board';document.querySelector('#selectBoard').classList.add('selected');document.querySelector('#selectLegend').classList.remove('selected');document.querySelector('#cropHelp').textContent='框选图纸的网格区域，尽量贴合最外侧格线';drawImageCanvas(); };
-document.querySelector('#selectLegend').onclick = () => { selectionMode='legend';document.querySelector('#selectLegend').classList.add('selected');document.querySelector('#selectBoard').classList.remove('selected');document.querySelector('#cropHelp').textContent='框选底部色号和数量色块，不要包含网格坐标';drawImageCanvas(); };
+imageCanvas.addEventListener('pointerup',event=>{
+  if(!sourceImage||document.querySelector('#recognizePattern').disabled)return;
+  const point=canvasPoint(event);
+  if(document.querySelector('#cropMethod').value==='tap'){
+    if(!pointerStart||Math.hypot(event.clientX-pointerStart.x,event.clientY-pointerStart.y)>8)return;
+    pointerStart=null;
+    if(samplingLegendIndex!==null&&recognitionDraft){const entry=recognitionDraft.legend[samplingLegendIndex];if(entry){entry.rgb=ChartRecognizer.dominant(ChartRecognizer.pixels(sourcePixels(),{x:point.x-2,y:point.y-2,w:5,h:5}));samplingLegendIndex=null;updateRecognitionDraft();setRecognitionStatus('色块样本已更新。');}return;}
+    if(!cropTapAnchor){invalidateRecognition();cropTapAnchor=point;document.querySelector('#cropHelp').textContent='已标记第一个角。可滚动图片，再点另一个角。';drawImageCanvas();return;}
+    cropDrag=cropTapAnchor;cropTapAnchor=null;
+  }
+  if(!cropDrag)return;
+  updateCrop(point);const rect=selectionMode==='board'?cropRect:footerRect;cropDrag=null;
+  if(rect.w<20||rect.h<20){if(selectionMode==='board')cropRect=null;else footerRect=null;setRecognitionStatus('选区太小，请重新选择两个角。',true);}
+  document.querySelector('#cropHelp').textContent='选区已标记，请核对范围和分格辅助线。';drawImageCanvas();
+});
+document.querySelector('#selectBoard').onclick = () => { samplingLegendIndex=null;cropTapAnchor=null;selectionMode='board';document.querySelector('#selectBoard').classList.add('selected');document.querySelector('#selectLegend').classList.remove('selected');document.querySelector('#cropHelp').textContent='框选图纸的网格区域，尽量贴合最外侧格线';drawImageCanvas(); };
+document.querySelector('#selectLegend').onclick = () => { samplingLegendIndex=null;cropTapAnchor=null;selectionMode='legend';document.querySelector('#selectLegend').classList.add('selected');document.querySelector('#selectBoard').classList.remove('selected');document.querySelector('#cropHelp').textContent='框选底部色号和数量色块，不要包含网格坐标';drawImageCanvas(); };
 document.querySelector('#exportData').onclick = () => {
   const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='豆豆工坊-备份.json';a.click();URL.revokeObjectURL(url);
 };
@@ -444,7 +443,7 @@ document.querySelector('#patternEditor').addEventListener('click', event => {
   const focus=event.target.closest('[data-focus-color]');
   if(focus){selectedEditColor=focus.dataset.focusColor;highlightEditColor=true;renderEditor(editPatternId);return;}
   const cell=event.target.closest('[data-cell]');
-  if(cell){const pattern=state.patterns.find(item=>item.id===editPatternId);if(!pattern)return;const index=Number(cell.dataset.cell);pattern.cells[index]=selectedEditColor;persist();renderEditor(editPatternId);renderPatterns();}
+  if(cell){const pattern=state.patterns.find(item=>item.id===editPatternId);if(!pattern)return;const index=Number(cell.dataset.cell);pattern.cells[index]=selectedEditColor||null;persist();renderEditor(editPatternId);renderPatterns();}
 });
 document.querySelector('#patternEditor').addEventListener('change', event => {
   if(event.target.id==='editColor'){selectedEditColor=event.target.value;renderEditor(editPatternId);}
@@ -466,5 +465,10 @@ document.querySelector('#workArea').addEventListener('input', event => {
   canvas.querySelectorAll('.pattern-cell').forEach(cell=>{cell.style.width=`${cellSize}px`;cell.style.height=`${cellSize}px`;cell.textContent=cellSize>=24?cell.title.split(' · ').pop().replace('空格',''):'';});
   event.target.nextElementSibling.textContent=`${cellSize}px`;
 });
+document.querySelector('#gridOverlay').onchange=drawImageCanvas;
+document.querySelector('#imageZoom').oninput=event=>{imageCanvas.style.width=`${Number(event.target.value)*100}%`;};
+document.querySelector('#cropMethod').onchange=event=>{cropTapAnchor=null;cropDrag=null;imageCanvas.style.touchAction=event.target.value==='tap'?'pan-x pan-y':'none';document.querySelector('#cropHelp').textContent=event.target.value==='tap'?'先点左上角，滚动图片后再点右下角':'拖动框选目标区域';drawImageCanvas();};
+for(const id of ['#gridCols','#gridRows'])document.querySelector(id).addEventListener('change',()=>{invalidateRecognition();drawImageCanvas();});
+imageCanvas.addEventListener('pointercancel',()=>{cropDrag=null;pointerStart=null;});
 renderInventory();renderPatterns();
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js').catch(()=>{});

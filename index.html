@@ -33,18 +33,21 @@
     <section class="view" id="patternsView">
       <div class="page-heading"><div><p class="eyebrow">PATTERN DESK</p><h1>我的图纸</h1></div><button class="primary-button" id="newPattern">＋ 新建图纸</button></div>
       <div class="import-panel image-import" id="importPanel">
-        <div class="import-icon">▧</div><div><h2>从图片识别图纸</h2><p>框选网格和底部色号统计，只识别少量色号，其余按本图色块快速匹配。</p></div>
+        <div class="import-icon">▧</div><div><h2>从图片识别图纸</h2><p>框选网格内侧和底部统计，按原图填写行列数。自动读图例、匹配色号，并逐色核对用量。</p></div>
         <label class="file-picker">选择图纸图片<input id="patternImage" type="file" accept="image/*"></label>
-        <div id="imageStage" class="image-stage" hidden><canvas id="imageCanvas"></canvas><div class="crop-help" id="cropHelp">拖动框选网格内侧边界</div></div>
+        <div id="imageStage" class="image-stage" hidden><canvas id="imageCanvas"></canvas><div class="crop-help" id="cropHelp">先点左上角，滚动图片后再点右下角</div></div>
         <div class="roi-selectors" id="roiSelectors" hidden><button id="selectBoard" class="selected">选网格区域</button><button id="selectLegend">选底部统计区域</button></div>
+        <div class="image-controls"><label>选区方式 <select id="cropMethod"><option value="tap">两次点选</option><option value="drag">拖动框选</option></select></label><label>原图放大 <input id="imageZoom" type="range" min="1" max="3" step="0.25" value="1"></label></div>
         <div class="recognition-fields" id="recognitionFields" hidden>
-          <label>列数<input id="gridCols" type="number" min="1" max="160" value="48"></label>
-          <label>行数<input id="gridRows" type="number" min="1" max="160" value="48"></label>
+          <label>列数<input id="gridCols" type="number" min="1" max="160" placeholder="例如 48"></label>
+          <label>行数<input id="gridRows" type="number" min="1" max="160" placeholder="例如 48"></label>
           <label class="pattern-name-field">图纸名称<input id="patternName" type="text" placeholder="例如：小花胸针"></label>
           <button class="primary-button" id="recognizePattern">识别色号</button>
         </div>
+        <label class="grid-overlay-toggle"><input id="gridOverlay" type="checkbox" checked>显示分格辅助线：应与原图格线重合，行列数按外侧坐标填写。</label>
         <div id="recognitionStatus" class="recognition-status" hidden></div>
         <div id="recognitionAudit" class="recognition-audit" hidden></div>
+        <div id="recognitionPreview" class="recognition-preview" hidden></div>
         <button class="secondary-button" id="saveRecognized" hidden>确认并保存图纸</button>
         <details class="manual-import"><summary>粘贴色号网格</summary>
           <textarea id="patternInput" rows="4" placeholder="A1 A1 B2 B2 C3&#10;A1 B2 B2 C3 C3"></textarea>
@@ -69,6 +72,8 @@
   <dialog id="confirmDialog"><form method="dialog" class="dialog-body"><button class="dialog-close" value="cancel" aria-label="关闭">×</button><h2 id="dialogTitle"></h2><div id="dialogContent"></div><div class="dialog-actions"><button class="secondary-button" value="cancel">取消</button><button class="primary-button" id="dialogConfirm" value="confirm">确定</button></div></form></dialog>
   <input type="file" id="backupInput" accept="application/json" hidden>
   <script src="palette-data.js"></script>
+  <script src="recognizer.js"></script>
+  <script src="recognition-flow.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
