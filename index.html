@@ -8,6 +8,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="recognition.css">
+  <link rel="stylesheet" href="roi.css">
   <link rel="stylesheet" href="visibility.css">
   <link rel="stylesheet" href="grid.css">
   <title>豆豆工坊</title>
@@ -32,9 +33,10 @@
     <section class="view" id="patternsView">
       <div class="page-heading"><div><p class="eyebrow">PATTERN DESK</p><h1>我的图纸</h1></div><button class="primary-button" id="newPattern">＋ 新建图纸</button></div>
       <div class="import-panel image-import" id="importPanel">
-        <div class="import-icon">▧</div><div><h2>从图片识别图纸</h2><p>选择图片后框选网格区域，并填写图纸行列数。</p></div>
+        <div class="import-icon">▧</div><div><h2>从图片识别图纸</h2><p>框选网格和底部色号统计，只识别少量色号，其余按本图色块快速匹配。</p></div>
         <label class="file-picker">选择图纸图片<input id="patternImage" type="file" accept="image/*"></label>
-        <div id="imageStage" class="image-stage" hidden><canvas id="imageCanvas"></canvas><div class="crop-help">拖动框选网格内侧边界</div></div>
+        <div id="imageStage" class="image-stage" hidden><canvas id="imageCanvas"></canvas><div class="crop-help" id="cropHelp">拖动框选网格内侧边界</div></div>
+        <div class="roi-selectors" id="roiSelectors" hidden><button id="selectBoard" class="selected">选网格区域</button><button id="selectLegend">选底部统计区域</button></div>
         <div class="recognition-fields" id="recognitionFields" hidden>
           <label>列数<input id="gridCols" type="number" min="1" max="160" value="48"></label>
           <label>行数<input id="gridRows" type="number" min="1" max="160" value="48"></label>

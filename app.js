@@ -9,8 +9,13 @@ let highlightEditColor = false;
 let cellSize = 18;
 let sourceImage = null;
 let cropRect = null;
+let footerRect = null;
 let cropDrag = null;
+let selectionMode = 'board';
 let recognitionDraft = null;
+let ocrWorker = null;
+let ocrWorkerPromise = null;
+let sourceCanvas = null;
 
 function loadState() {
   try {
@@ -98,16 +103,19 @@ function drawImageCanvas() {
   const canvas = document.querySelector('#imageCanvas');
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(sourceImage, 0, 0, canvas.width, canvas.height);
-  if (cropRect) {
-    ctx.fillStyle = '#10221c77';
-    ctx.fillRect(0, 0, canvas.width, cropRect.y);
-    ctx.fillRect(0, cropRect.y + cropRect.h, canvas.width, canvas.height - cropRect.y - cropRect.h);
-    ctx.fillRect(0, cropRect.y, cropRect.x, cropRect.h);
-    ctx.fillRect(cropRect.x + cropRect.w, cropRect.y, canvas.width - cropRect.x - cropRect.w, cropRect.h);
-    ctx.strokeStyle = '#ffed8b'; ctx.lineWidth = Math.max(3, canvas.width / 500);
-    ctx.strokeRect(cropRect.x, cropRect.y, cropRect.w, cropRect.h);
-  }
+  if (sourceCanvas) ctx.drawImage(sourceCanvas, 0, 0);
+  const shadeOutside = (rect, color) => {
+    if (!rect) return;
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, canvas.width, rect.y);
+    ctx.fillRect(0, rect.y + rect.h, canvas.width, canvas.height - rect.y - rect.h);
+    ctx.fillRect(0, rect.y, rect.x, rect.h);
+    ctx.fillRect(rect.x + rect.w, rect.y, canvas.width - rect.x - rect.w, rect.h);
+  };
+  const activeRect = selectionMode === 'board' ? cropRect : footerRect;
+  if (activeRect) shadeOutside(activeRect, '#10221c77');
+  if (cropRect) { ctx.strokeStyle = '#ffed8b'; ctx.lineWidth = Math.max(3, canvas.width / 500); ctx.strokeRect(cropRect.x, cropRect.y, cropRect.w, cropRect.h); }
+  if (footerRect) { ctx.strokeStyle = '#69e0d2'; ctx.lineWidth = Math.max(3, canvas.width / 500); ctx.strokeRect(footerRect.x, footerRect.y, footerRect.w, footerRect.h); }
 }
 function loadImageFile(file) {
   if (!file) return;
@@ -118,86 +126,101 @@ function loadImageFile(file) {
     const canvas = document.querySelector('#imageCanvas');
     canvas.width = Math.round(image.naturalWidth * scale);
     canvas.height = Math.round(image.naturalHeight * scale);
-    sourceImage = image; cropRect = null; recognitionDraft = null;
+    sourceCanvas = document.createElement('canvas'); sourceCanvas.width = canvas.width; sourceCanvas.height = canvas.height;
+    sourceCanvas.getContext('2d').drawImage(image, 0, 0, sourceCanvas.width, sourceCanvas.height);
+    sourceImage = image; cropRect = null; footerRect = null; recognitionDraft = null; selectionMode = 'board';
     document.querySelector('#imageStage').hidden = false;
+    document.querySelector('#roiSelectors').hidden = false;
     document.querySelector('#recognitionFields').hidden = false;
     document.querySelector('#recognitionStatus').hidden = true;
     document.querySelector('#recognitionAudit').hidden = true;
     document.querySelector('#saveRecognized').hidden = true;
+    document.querySelector('#cropHelp').textContent = '拖动框选网格内侧边界';
+    document.querySelector('#selectBoard').classList.add('selected');
+    document.querySelector('#selectLegend').classList.remove('selected');
     document.querySelector('#patternName').value = file.name.replace(/\.[^.]+$/, '');
     drawImageCanvas(); URL.revokeObjectURL(url);
   };
   image.onerror = () => { URL.revokeObjectURL(url); setRecognitionStatus('图片无法读取，请换一张 PNG 或 JPG。', true); };
   image.src = url;
 }
-async function getOcrWorker(onProgress) {
-  if (!window.Tesseract) {
-    await new Promise((resolve, reject) => {
+async function getOcrWorker() {
+  if (ocrWorker) return ocrWorker;
+  if (ocrWorkerPromise) return ocrWorkerPromise;
+  ocrWorkerPromise = (async () => {
+    if (!window.Tesseract) await new Promise((resolve, reject) => {
       const script = document.createElement('script');
       script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
       script.onload = resolve; script.onerror = () => reject(new Error('OCR 组件加载失败，请检查网络后重试。'));
       document.head.append(script);
     });
-  }
-  const worker = await window.Tesseract.createWorker('eng', 1, {
-    workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
-    corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js',
-    langPath: 'https://tessdata.projectnaptha.com/4.0.0_best',
-    logger: item => { if (item.status === 'recognizing text') onProgress(Math.round(item.progress * 100)); }
-  });
-  await worker.setParameters({ tessedit_pageseg_mode: '11', tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789' });
-  return worker;
+    const worker = await window.Tesseract.createWorker('eng', 1, {
+      workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+      corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core.wasm.js',
+      langPath: 'https://tessdata.projectnaptha.com/4.0.0_best',
+      logger: item => { const bar=document.querySelector('#recognitionStatus progress');if(bar&&item.status==='recognizing text')bar.value=Math.round(item.progress*100); }
+    });
+    await worker.setParameters({ tessedit_pageseg_mode: '11', tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789' });
+    ocrWorker = worker;
+    return worker;
+  })();
+  try { return await ocrWorkerPromise; } catch (error) { ocrWorkerPromise = null; throw error; }
 }
-function makeOcrCanvas(rect, rows, cols) {
-  const scale = Math.min(4, Math.max(2, 1800 / Math.max(rect.w, rect.h)));
+function makeFooterOcrCanvas(rect) {
+  const scale = Math.min(4, Math.max(2, 1500 / Math.max(rect.w, rect.h)));
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(rect.w * scale); canvas.height = Math.round(rect.h * scale);
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(document.querySelector('#imageCanvas'), rect.x, rect.y, rect.w, rect.h, 0, 0, canvas.width, canvas.height);
-  const cellW = canvas.width / cols; const cellH = canvas.height / rows;
-  ctx.fillStyle = '#fff';
-  const line = Math.max(3, Math.round(scale * 2));
-  for (let x = 0; x <= cols; x++) ctx.fillRect(Math.round(x * cellW - line / 2), 0, line, canvas.height);
-  for (let y = 0; y <= rows; y++) ctx.fillRect(0, Math.round(y * cellH - line / 2), canvas.width, line);
-  return { canvas, scale, cellW, cellH };
+  canvas.getContext('2d').drawImage(sourceCanvas, rect.x, rect.y, rect.w, rect.h, 0, 0, canvas.width, canvas.height);
+  return { canvas, scale };
 }
-function occupiedCells(rect, rows, cols) {
-  const source = document.querySelector('#imageCanvas');
-  const ctx = source.getContext('2d', { willReadFrequently: true });
-  const cells = [];
-  for (let row = 0; row < rows; row++) for (let col = 0; col < cols; col++) {
-    const x = rect.x + col * rect.w / cols; const y = rect.y + row * rect.h / rows;
-    const insetX = rect.w / cols * 0.2; const insetY = rect.h / rows * 0.2;
-    const w = Math.max(1, Math.floor(rect.w / cols * 0.6)); const h = Math.max(1, Math.floor(rect.h / rows * 0.6));
-    const pixels = ctx.getImageData(Math.floor(x + insetX), Math.floor(y + insetY), Math.min(w, source.width - Math.floor(x + insetX)), Math.min(h, source.height - Math.floor(y + insetY))).data;
-    let foreground = 0; let sampled = 0;
-    for (let i = 0; i < pixels.length; i += 16) {
-      const r=pixels[i], g=pixels[i+1], b=pixels[i+2];
-      const light=(r*299+g*587+b*114)/1000; const saturation=Math.max(r,g,b)-Math.min(r,g,b);
-      if (light < 205 || saturation > 24 && light < 250) foreground++;
-      sampled++;
-    }
-    cells.push(foreground / Math.max(1, sampled) > 0.018);
+function rgbToLab(rgb) {
+  let [r,g,b] = rgb.map(value => value / 255).map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+  let x=(r*0.4124+g*0.3576+b*0.1805)/0.95047;
+  let y=(r*0.2126+g*0.7152+b*0.0722);
+  let z=(r*0.0193+g*0.1192+b*0.9505)/1.08883;
+  const f=value=>value>0.008856?Math.cbrt(value):7.787*value+16/116;
+  x=f(x);y=f(y);z=f(z);
+  return [116*y-16,500*(x-y),200*(y-z)];
+}
+function labDistance(a,b) { return Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]); }
+function pixelMedian(imageData, cx, cy, rx, ry) {
+  const channels=[[],[],[]]; const x0=Math.max(0,Math.floor(cx-rx)); const x1=Math.min(imageData.width-1,Math.ceil(cx+rx));
+  const y0=Math.max(0,Math.floor(cy-ry)); const y1=Math.min(imageData.height-1,Math.ceil(cy+ry));
+  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const i=(y*imageData.width+x)*4;for(let c=0;c<3;c++)channels[c].push(imageData.data[i+c]);}
+  return channels.map(values=>{values.sort((a,b)=>a-b);return values[Math.floor(values.length/2)]||0;});
+}
+function readLegend(words, rect, scale, imageData) {
+  const wordsInRoi=(words||[]).filter(word=>word.confidence>18).map(word=>{const raw=word.text.toUpperCase();const code=raw.replace(/[^A-Z0-9]/g,'');return {word,x:rect.x+(word.bbox.x0+word.bbox.x1)/(2*scale),y:rect.y+(word.bbox.y0+word.bbox.y1)/(2*scale),code,number:/^[0-9]{1,5}$/.test(raw)?raw:'',inlineCount:raw.match(/\(([0-9]{1,5})\)/)?.[1]};});
+  const codeWords=wordsInRoi.filter(item=>colorMap.has(item.code));
+  const numbers=wordsInRoi.filter(item=>item.number);
+  const legend=[]; const counts={};
+  for(const item of codeWords){
+    const nearest=numbers.map(number=>({...number,dx:Math.abs(number.x-item.x),dy:number.y-item.y})).filter(number=>number.dx<Math.max(100,rect.w*0.22)&&number.dy>-12&&number.dy<Math.max(80,rect.h*0.6)).sort((a,b)=>a.dx+a.dy*1.2-(b.dx+b.dy*1.2))[0];
+    const rgb=pixelMedian(imageData,item.x,item.y,Math.min(15,Math.max(5,rect.w*0.018)),Math.min(7,Math.max(3,rect.h*0.12)));
+    const entry={code:item.code,rgb,lab:rgbToLab(rgb),count:item.inlineCount?Number(item.inlineCount):nearest?Number(nearest.number):null};
+    if(!legend.some(existing=>existing.code===entry.code)){legend.push(entry);if(entry.count!==null)counts[entry.code]=entry.count;}
+  }
+  return {legend,counts};
+}
+function classifyGrid(rect, rows, cols, legend) {
+  const imageData=sourceCanvas.getContext('2d',{willReadFrequently:true}).getImageData(0,0,sourceCanvas.width,sourceCanvas.height);
+  const cells=[];const cellW=rect.w/cols;const cellH=rect.h/rows;
+  const patch=Math.max(1,Math.round(Math.min(cellW,cellH)*0.045));
+  for(let row=0;row<rows;row++)for(let col=0;col<cols;col++){
+    const x=rect.x+col*cellW;const y=rect.y+row*cellH;
+    const backgroundSamples=[[.28,.28],[.72,.28],[.28,.72],[.72,.72]].map(([fx,fy])=>pixelMedian(imageData,x+cellW*fx,y+cellH*fy,patch,patch));
+    const rgb=[0,1,2].map(channel=>Math.round(backgroundSamples.reduce((sum,sample)=>sum+sample[channel],0)/4));
+    const lab=rgbToLab(rgb);const center=imageData;let ink=0,total=0;
+    const x0=Math.max(0,Math.floor(x+cellW*.27));const x1=Math.min(center.width,Math.ceil(x+cellW*.73));
+    const y0=Math.max(0,Math.floor(y+cellH*.27));const y1=Math.min(center.height,Math.ceil(y+cellH*.73));
+    for(let py=y0;py<y1;py+=2)for(let px=x0;px<x1;px+=2){const i=(py*center.width+px)*4;const delta=Math.hypot(center.data[i]-rgb[0],center.data[i+1]-rgb[1],center.data[i+2]-rgb[2]);if(delta>65)ink++;total++;}
+    const hasLabel=ink/Math.max(1,total)>0.018;
+    const matches=legend.map(item=>({...item,distance:labDistance(lab,item.lab)})).sort((a,b)=>a.distance-b.distance);
+    const best=matches[0];const gap=matches[1]?matches[1].distance-best.distance:100;
+    if(!best||(!hasLabel&&lab[0]>84)){cells.push(null);continue;}
+    cells.push(best.distance>42||gap<1.5?'?':best.code);
   }
   return cells;
-}
-function parseFooterCounts(words, rect, imageHeight) {
-  const footer = words.filter(word => word.bbox.y0 > rect.y + rect.h + imageHeight * 0.012 && word.confidence > 20);
-  const codes = footer.map(word => ({ word, code: word.text.toUpperCase().replace(/[^A-Z0-9]/g, '') })).filter(item => colorMap.has(item.code));
-  const numbers = footer.map(word => ({ word, value: word.text.replace(/[^0-9]/g, '') })).filter(item => /^\d{1,5}$/.test(item.value));
-  const counts = {};
-  for (const item of codes) {
-    const x = (item.word.bbox.x0 + item.word.bbox.x1) / 2;
-    const y = (item.word.bbox.y0 + item.word.bbox.y1) / 2;
-    const nearest = numbers.map(number => {
-      const nx = (number.word.bbox.x0 + number.word.bbox.x1) / 2;
-      const ny = (number.word.bbox.y0 + number.word.bbox.y1) / 2;
-      return { number, distance: Math.abs(nx - x) + Math.abs(ny - y) * 1.5, dx: Math.abs(nx - x), dy: ny - y };
-    }).filter(candidate => candidate.dx < 180 && candidate.dy > -8 && candidate.dy < 100).sort((a,b) => a.distance - b.distance)[0];
-    if (nearest && counts[item.code] === undefined) counts[item.code] = Number(nearest.number.value);
-  }
-  return counts;
 }
 function renderRecognitionAudit(pattern) {
   const host = document.querySelector('#recognitionAudit');
@@ -213,39 +236,34 @@ function renderRecognitionAudit(pattern) {
 async function recognizeImage() {
   const cols = Number(document.querySelector('#gridCols').value);
   const rows = Number(document.querySelector('#gridRows').value);
-  if (!sourceImage || !cropRect) return setRecognitionStatus('请先上传图片，再拖动框选图纸网格区域。', true);
+  const boardRect=cropRect&&{...cropRect};const legendRect=footerRect&&{...footerRect};
+  if (!sourceCanvas || !boardRect || !legendRect) return setRecognitionStatus('请分别框选图纸网格和底部色号统计区域。', true);
   if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols < 1 || rows < 1 || cols > 160 || rows > 160) return setRecognitionStatus('请输入有效的行数和列数（1 到 160）。', true);
-  if (cropRect.w / cols < 8 || cropRect.h / rows < 8) return setRecognitionStatus('选中的网格区域太小，请放大图片或重新框选。', true);
+  if (boardRect.w / cols < 8 || boardRect.h / rows < 8) return setRecognitionStatus('选中的网格区域太小，请放大图片或重新框选。', true);
   const status = document.querySelector('#recognitionStatus');
   const recognizeButton = document.querySelector('#recognizePattern');
   recognizeButton.disabled = true;
-  status.hidden = false; status.classList.remove('error'); status.innerHTML = '正在加载本地 OCR 引擎…<progress max="100" value="0"></progress>';
-  let worker;
+  document.querySelector('#patternImage').disabled = true;
+  document.querySelector('#selectBoard').disabled = true;
+  document.querySelector('#selectLegend').disabled = true;
+  status.hidden = false; status.classList.remove('error'); status.innerHTML = `${ocrWorker?'正在读取底部色号…':'正在启动 OCR 引擎…'}<progress max="100" value="0"></progress>`;
   try {
-    worker = await getOcrWorker(value => { const bar=document.querySelector('#recognitionStatus progress');if(bar)bar.value=value; });
-    const { canvas, scale, cellW, cellH } = makeOcrCanvas(cropRect, rows, cols);
-    status.innerHTML = '正在逐格识别色号…<progress max="100" value="0"></progress>';
-    const boardResult = await worker.recognize(canvas);
-    const occupied = occupiedCells(cropRect, rows, cols);
-    const cells = occupied.map(value => value ? '?' : null);
-    for (const word of boardResult.data.words || []) {
-      const code = word.text.toUpperCase().replace(/[^A-Z0-9]/g, '');
-      if (!colorMap.has(code) || word.confidence < 18) continue;
-      const x = (word.bbox.x0 + word.bbox.x1) / 2;
-      const y = (word.bbox.y0 + word.bbox.y1) / 2;
-      const col = Math.floor(x / cellW); const row = Math.floor(y / cellH);
-      if (row >= 0 && row < rows && col >= 0 && col < cols) cells[row * cols + col] = code;
-    }
-    const wholeResult = await worker.recognize(document.querySelector('#imageCanvas'));
-    const footerCounts = parseFooterCounts(wholeResult.data.words || [], cropRect, document.querySelector('#imageCanvas').height);
+    const worker = await getOcrWorker();
+    const { canvas, scale } = makeFooterOcrCanvas(legendRect);
+    const footerResult = await worker.recognize(canvas);
+    const sourcePixels=sourceCanvas.getContext('2d',{willReadFrequently:true}).getImageData(0,0,sourceCanvas.width,sourceCanvas.height);
+    const { legend, counts: footerCounts } = readLegend(footerResult.data.words || [], legendRect, scale, sourcePixels);
+    if (!legend.length) throw new Error('底部区域没有读到有效色号。请只框选色号统计条，或重新拍一张更清晰的图。');
+    setRecognitionStatus(`已读取 ${legend.length} 个色号，正在按色块匹配 ${rows * cols} 个格子…`);
+    const cells = classifyGrid(boardRect, rows, cols, legend);
     recognitionDraft = { id: crypto.randomUUID(), name: document.querySelector('#patternName').value.trim() || `图纸 ${state.patterns.length + 1}`, width: cols, height: rows, cells, done: {}, footerCounts, source: 'image' };
     renderRecognitionAudit(recognitionDraft);
     document.querySelector('#saveRecognized').hidden = false;
-    setRecognitionStatus('识别完成。红色空格没有读到有效色号，可在网格编辑中选色修正。');
+    setRecognitionStatus('识别完成。红色格子为无法可靠匹配的色号，可在网格中修正。');
     document.querySelector('#recognitionAudit').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } catch (error) {
     setRecognitionStatus(error.message || '识别失败，请重新选择图片或稍后重试。', true);
-  } finally { if (worker) await worker.terminate(); recognizeButton.disabled = false; }
+  } finally { recognizeButton.disabled = false;document.querySelector('#patternImage').disabled=false;document.querySelector('#selectBoard').disabled=false;document.querySelector('#selectLegend').disabled=false; }
 }
 function renderEditor(id) {
   const pattern = state.patterns.find(item => item.id === id);
@@ -370,9 +388,16 @@ function canvasPoint(event) {
   const rect = imageCanvas.getBoundingClientRect();
   return { x: Math.round((event.clientX - rect.left) * imageCanvas.width / rect.width), y: Math.round((event.clientY - rect.top) * imageCanvas.height / rect.height) };
 }
-imageCanvas.addEventListener('pointerdown', event => { if (!sourceImage) return; imageCanvas.setPointerCapture(event.pointerId); cropDrag = canvasPoint(event); cropRect = { x: cropDrag.x, y: cropDrag.y, w: 1, h: 1 }; drawImageCanvas(); });
-imageCanvas.addEventListener('pointermove', event => { if (!cropDrag) return; const point=canvasPoint(event); cropRect={x:Math.min(cropDrag.x,point.x),y:Math.min(cropDrag.y,point.y),w:Math.abs(point.x-cropDrag.x),h:Math.abs(point.y-cropDrag.y)};drawImageCanvas(); });
-imageCanvas.addEventListener('pointerup', event => { if (!cropDrag) return; const point=canvasPoint(event);cropRect={x:Math.min(cropDrag.x,point.x),y:Math.min(cropDrag.y,point.y),w:Math.abs(point.x-cropDrag.x),h:Math.abs(point.y-cropDrag.y)};cropDrag=null;if(cropRect.w<20||cropRect.h<20)cropRect=null;drawImageCanvas(); });
+function updateCrop(point) {
+  const rect={x:Math.min(cropDrag.x,point.x),y:Math.min(cropDrag.y,point.y),w:Math.abs(point.x-cropDrag.x),h:Math.abs(point.y-cropDrag.y)};
+  if(selectionMode==='board')cropRect=rect;else footerRect=rect;
+  drawImageCanvas();
+}
+imageCanvas.addEventListener('pointerdown', event => { if (!sourceImage) return; imageCanvas.setPointerCapture(event.pointerId); cropDrag = canvasPoint(event); updateCrop(cropDrag); });
+imageCanvas.addEventListener('pointermove', event => { if (cropDrag) updateCrop(canvasPoint(event)); });
+imageCanvas.addEventListener('pointerup', event => { if (!cropDrag) return; updateCrop(canvasPoint(event)); const rect=selectionMode==='board'?cropRect:footerRect;cropDrag=null;if(rect.w<20||rect.h<20){if(selectionMode==='board')cropRect=null;else footerRect=null;}drawImageCanvas(); });
+document.querySelector('#selectBoard').onclick = () => { selectionMode='board';document.querySelector('#selectBoard').classList.add('selected');document.querySelector('#selectLegend').classList.remove('selected');document.querySelector('#cropHelp').textContent='框选图纸的网格区域，尽量贴合最外侧格线';drawImageCanvas(); };
+document.querySelector('#selectLegend').onclick = () => { selectionMode='legend';document.querySelector('#selectLegend').classList.add('selected');document.querySelector('#selectBoard').classList.remove('selected');document.querySelector('#cropHelp').textContent='框选底部色号和数量色块，不要包含网格坐标';drawImageCanvas(); };
 document.querySelector('#exportData').onclick = () => {
   const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='豆豆工坊-备份.json';a.click();URL.revokeObjectURL(url);
 };
