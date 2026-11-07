@@ -1,0 +1,9 @@
+{
+  "name": "豆豆工坊 · 拼豆库存与图纸",
+  "short_name": "豆豆工坊",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f5f6f4",
+  "theme_color": "#f5f6f4",
+  "icons": []
+}

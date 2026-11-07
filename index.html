@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f6f4">
+  <meta name="description" content="拼豆库存与图纸工作台，数据保存在本机。">
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="styles.css">
+  <title>豆豆工坊</title>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="豆豆工坊首页"><span class="brand-mark">豆</span><span>豆豆工坊</span></a>
+    <div style="display:flex;gap:7px"><button class="icon-button" id="importData" title="恢复备份" aria-label="恢复备份">⇩</button><button class="icon-button" id="exportData" title="导出备份" aria-label="导出备份">⇧</button></div>
+  </header>
+  <main>
+    <section class="view active" id="inventoryView">
+      <div class="page-heading"><div><p class="eyebrow">MY COLLECTION</p><h1>色号库存</h1></div><button class="text-button" id="adjustAll">调整库存</button></div>
+      <div class="summary-strip">
+        <div><strong id="colorCount">221</strong><span>个色号</span></div>
+        <div><strong id="beadTotal">221,000</strong><span>颗现有库存</span></div>
+        <div><strong id="lowCount">0</strong><span>低库存</span></div>
+      </div>
+      <div class="toolbar"><label class="searchbox"><span>⌕</span><input id="colorSearch" type="search" placeholder="搜索色号" autocomplete="off"></label><select id="inventoryFilter" aria-label="筛选库存"><option value="all">全部色号</option><option value="low">低于 100 颗</option><option value="zero">已用完</option></select></div>
+      <div id="inventoryGrid" class="inventory-grid"></div>
+    </section>
+
+    <section class="view" id="patternsView">
+      <div class="page-heading"><div><p class="eyebrow">PATTERN DESK</p><h1>我的图纸</h1></div><button class="primary-button" id="newPattern">＋ 新建图纸</button></div>
+      <div class="import-panel" id="importPanel">
+        <div class="import-icon">▦</div><div><h2>导入色号网格</h2><p>粘贴每格对应的色号，空格、逗号或制表符分隔；换行表示下一行。</p></div>
+        <textarea id="patternInput" rows="4" placeholder="A1 A1 B2 B2 C3&#10;A1 B2 B2 C3 C3"></textarea>
+        <div class="form-row"><label>图纸名称<input id="patternName" type="text" placeholder="例如：小花胸针"></label><button class="primary-button" id="importPattern">生成图纸</button></div>
+        <p class="input-hint">支持色号如 A1、M15；未知色号会标记出来供你修正。色号网格可以从表格复制粘贴。</p>
+      </div>
+      <div id="patternList" class="pattern-list"></div>
+      <div class="editor" id="patternEditor" hidden></div>
+    </section>
+
+    <section class="view" id="workView">
+      <div class="page-heading"><div><p class="eyebrow">BEAD BY COLOR</p><h1>拼制模式</h1></div></div>
+      <div id="workEmpty" class="empty-state"><div class="empty-symbol">◉</div><h2>选择一张图纸开始拼</h2><p>按色号筛选，高亮对应格子，并记录已完成数量。</p><button class="primary-button" data-goto="patterns">查看图纸</button></div>
+      <div id="workArea" hidden></div>
+    </section>
+  </main>
+  <nav class="bottom-nav" aria-label="主导航">
+    <button class="nav-item active" data-view="inventory"><span>▤</span>库存</button>
+    <button class="nav-item" data-view="patterns"><span>▦</span>图纸</button>
+    <button class="nav-item" data-view="work"><span>◉</span>拼制</button>
+  </nav>
+  <dialog id="confirmDialog"><form method="dialog" class="dialog-body"><button class="dialog-close" value="cancel" aria-label="关闭">×</button><h2 id="dialogTitle"></h2><div id="dialogContent"></div><div class="dialog-actions"><button class="secondary-button" value="cancel">取消</button><button class="primary-button" id="dialogConfirm" value="confirm">确定</button></div></form></dialog>
+  <input type="file" id="backupInput" accept="application/json" hidden>
+  <script src="palette-data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
