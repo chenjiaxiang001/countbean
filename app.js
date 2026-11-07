@@ -262,13 +262,12 @@ async function recognizeImage() {
     const footerResult = await worker.recognize(canvas);
     const sourcePixels=sourceCanvas.getContext('2d',{willReadFrequently:true}).getImageData(0,0,sourceCanvas.width,sourceCanvas.height);
     const { legend, counts: footerCounts } = readLegend(footerResult.data.words || [], legendRect, scale, sourcePixels);
-    if (!legend.length) throw new Error('底部区域没有读到有效色号。请只框选色号统计条，或重新拍一张更清晰的图。');
-    setRecognitionStatus(`已读取 ${legend.length} 个色号，正在按色块匹配 ${rows * cols} 个格子…`);
+    setRecognitionStatus(legend.length ? `已读取 ${legend.length} 个色号，正在按色块匹配 ${rows * cols} 个格子…` : '没有读到底部色号，可在校对区手动补充。正在展开网格…');
     const cells = classifyGrid(boardRect, rows, cols, legend);
     recognitionDraft = { id: crypto.randomUUID(), name: document.querySelector('#patternName').value.trim() || `图纸 ${state.patterns.length + 1}`, width: cols, height: rows, cells, done: {}, footerCounts, legend, boardRect, source: 'image' };
     renderRecognitionAudit(recognitionDraft);
     document.querySelector('#saveRecognized').hidden = false;
-    setRecognitionStatus('初步识别完成。请先校对底部色号和数量，再逐个点“取色”校准；红色格子表示待匹配。');
+    setRecognitionStatus(legend.length ? '初步识别完成。请先校对底部色号和数量，再逐个点“取色”校准；红色格子表示待匹配。' : '未读到色号。请在下方手动补充色号和数量，再逐个点“取色”校准。');
     document.querySelector('#recognitionAudit').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } catch (error) {
     setRecognitionStatus(error.message || '识别失败，请重新选择图片或稍后重试。', true);
