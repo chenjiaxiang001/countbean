@@ -45,6 +45,8 @@
           <button class="primary-button" id="recognizePattern">识别色号</button>
         </div>
         <label class="grid-overlay-toggle"><input id="gridOverlay" type="checkbox" checked>显示分格辅助线：应与原图格线重合，行列数按外侧坐标填写。</label>
+        <button type="button" id="openAlignment" class="secondary-button">固定网格对齐 / 精调选区</button>
+        <section id="alignmentPanel" hidden></section>
         <div id="recognitionStatus" class="recognition-status" hidden></div>
         <div id="recognitionAudit" class="recognition-audit" hidden></div>
         <div id="recognitionPreview" class="recognition-preview" hidden></div>
@@ -75,5 +77,6 @@
   <script src="recognizer.js"></script>
   <script src="recognition-flow.js"></script>
   <script src="app.js"></script>
+  <script src="alignment.js"></script>
 </body>
 </html>

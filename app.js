@@ -86,13 +86,14 @@ function gridMarkup(pattern, { mode = 'edit', chosen = 'all', size = cellSize, h
   for (let row = 0; row < pattern.height; row++) {
     parts.push(`<span class="coordinate-label row-label">${row + 1}</span>`);
     for (let col = 0; col < pattern.width; col++) {
-      const index = row * pattern.width + col; const code = pattern.cells[index];
-      const dim = mode === 'work' || mode === 'draft' ? chosen !== 'all' && code !== chosen : highlight && selectedEditColor !== code;
+      const view = mode === 'work' ? pattern.workView || {} : {};
+      const index = (view.mirrorY ? pattern.height-1-row : row) * pattern.width + (view.mirrorX ? pattern.width-1-col : col); const code = pattern.cells[index];
+      const dim = mode === 'work' || mode === 'draft' ? chosen !== 'all' && code !== chosen && (mode !== 'work' || pattern.workView?.highlight !== false) : highlight && selectedEditColor !== code;
       const done = mode === 'work' && pattern.done?.[index];
       const key = mode === 'work' ? 'workcell' : mode === 'draft' ? 'draftcell' : 'cell';
       const color = patternColor(pattern,code);
       const label = code === '?' ? '?' : code || '';
-      parts.push(`<button class="pattern-cell ${code === '?' ? 'unknown' : ''} ${dim ? 'dim' : ''} ${done ? 'done' : ''}" data-${key}="${index}" title="第 ${row + 1} 行 · 第 ${col + 1} 列 · ${code === '?' ? '待校对' : code || '空格'}" style="background:${color};color:${patternTextColor(pattern,code)}">${size >= 24 ? esc(label) : ''}</button>`);
+      parts.push(`<button class="pattern-cell ${code === '?' ? 'unknown' : ''} ${dim ? 'dim' : ''} ${done ? 'done' : ''}" data-${key}="${index}" title="第 ${row + 1} 行 · 第 ${col + 1} 列 · ${code === '?' ? '待校对' : code || '空格'}" style="background:${color};color:${patternTextColor(pattern,code)}">${size >= 24 || mode === 'work' ? esc(label) : ''}</button>`);
     }
   }
   return `<div class="pattern-canvas" style="--cell-size:${size}px;grid-template-columns:30px repeat(${pattern.width}, ${size}px);grid-template-rows:30px repeat(${pattern.height}, ${size}px)">${parts.join('')}</div>`;
@@ -253,7 +254,7 @@ async function recognizeImage(allowUnequalCells=false) {
     confirmDialog('请核对行列数与选区', `<p>当前为 ${cols} 列 × ${rows} 行，选区分格后宽高相差 ${Math.abs((cellRatio-1)*100).toFixed(1)}%。常见拼豆图的格子应接近正方形，行列数或选区不准会导致采样错位。</p><p>若行数 ${rows} 正确，按选区比例估计约 ${Math.round(board.w/board.h*rows)} 列（仅作参考）。请取消后核对原图坐标和辅助格线；如果原图本来就经过拉伸，可确认继续。</p>`,()=>recognizeImage(true));
     return;
   }
-  const controls=['#recognizePattern','#patternImage','#selectBoard','#selectLegend','#gridCols','#gridRows'];controls.forEach(id=>document.querySelector(id).disabled=true);
+  const controls=['#openAlignment','#recognizePattern','#patternImage','#selectBoard','#selectLegend','#gridCols','#gridRows'];controls.forEach(id=>document.querySelector(id).disabled=true);
   recognitionDraft=null;recognitionSamples=null;samplingLegendIndex=null;draftSelection=null;draftHighlight='all';
   document.querySelector('#recognitionAudit').hidden=true;document.querySelector('#recognitionPreview').hidden=true;document.querySelector('#saveRecognized').hidden=true;
   const started=performance.now();
@@ -330,7 +331,9 @@ function renderWork() {
   const colors = Object.keys(counts).sort((a,b)=>a.localeCompare(b));
   const total = pattern.cells.filter(code=>colorMap.has(code)).length;
   const complete = Object.values(pattern.done || {}).filter(Boolean).length;
-  const chosen = currentWorkColor === 'all' ? 'all' : currentWorkColor;
+  if(currentWorkColor!=='all'&&!counts[currentWorkColor])currentWorkColor='all';
+  const chosen = currentWorkColor;
+  const view=pattern.workView||{};
   const unknown = pattern.cells.filter(code => code === '?').length;
   const usage = inventoryUsage(pattern);
   const insufficient = Object.entries(usage.counts).some(([code,count]) => count > Number(state.stock[code] || 0));
@@ -338,10 +341,13 @@ function renderWork() {
   const finishLabel = pattern.consumed ? '库存已扣减' : usage.blocked ? '先校对扣减用量' : insufficient ? '库存不足，先调整' : usage.fromFooter ? '完成并按底部统计扣库存' : '完成并扣库存';
   const activeCount = chosen === 'all' ? total : counts[chosen] || 0;
   const activeDone = chosen === 'all' ? complete : Object.entries(pattern.done || {}).filter(([index,done]) => done && pattern.cells[Number(index)] === chosen).length;
-  host.innerHTML = `<div class="work-summary"><h2>${esc(pattern.name)}</h2><select id="workPattern">${state.patterns.map(p=>`<option value="${p.id}" ${p.id===pattern.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select></div>${unknown ? `<p class="pattern-warning">${unknown} 个格子待校对，仍可对照原图修正。</p>` : ''}<p class="notice">库存扣减依据：${usage.fromFooter?'底部统计':'网格统计'}，共 ${fmt(usage.total)} 颗。${usage.fromFooter&&(unknown||mismatch)?'网格存在差异，不影响按底部统计扣减。':''}</p><div class="work-stats"><span>已完成 <strong>${complete}</strong> / ${total}</span><span>${Math.round(complete/Math.max(total,1)*100)}%</span><button class="text-button" id="finishWork" ${pattern.consumed||insufficient||usage.blocked?'disabled':''}>${finishLabel}</button></div><div class="work-color-summary"><i class="color-swatch" style="height:20px;width:26px;margin:0;background:${chosen==='all'?'#e2f1ea':colorMap.get(chosen)?.color}"></i><span>${chosen==='all'?'全部色号':`当前色号 ${chosen}`}</span><strong>${activeDone} / ${activeCount}</strong><span>已拼</span></div><div class="editor-tools"><label>当前色号 <select id="workColor"><option value="all">显示全部</option>${colors.map(code=>`<option value="${code}" ${chosen===code?'selected':''}>${code} · ${counts[code]} 颗 · 库存 ${fmt(state.stock[code])}</option>`).join('')}</select></label><button class="secondary-button" id="nextCell">标记下一个${chosen==='all'?'':' '+chosen}格</button><label class="tool-group">缩放 <input id="workZoom" type="range" min="12" max="36" step="2" value="${cellSize}"><span class="zoom-value">${cellSize}px</span></label></div><div class="pattern-scroll">${gridMarkup(pattern, { mode: 'work', chosen })}</div>`;
+  host.innerHTML = `<div class="work-summary"><h2>${esc(pattern.name)}</h2><select id="workPattern">${state.patterns.map(p=>`<option value="${p.id}" ${p.id===pattern.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select></div>${unknown ? `<p class="pattern-warning">${unknown} 个格子待校对，仍可对照原图修正。</p>` : ''}<p class="notice">库存扣减依据：${usage.fromFooter?'底部统计':'网格统计'}，共 ${fmt(usage.total)} 颗。${usage.fromFooter&&(unknown||mismatch)?'网格存在差异，不影响按底部统计扣减。':''}</p><div class="work-stats"><span>已完成 <strong>${complete}</strong> / ${total}</span><span>${Math.round(complete/Math.max(total,1)*100)}%</span><button class="text-button" id="finishWork" ${pattern.consumed||insufficient||usage.blocked?'disabled':''}>${finishLabel}</button></div><div class="work-color-summary"><i class="color-swatch" style="height:20px;width:26px;margin:0;background:${chosen==='all'?'#e2f1ea':colorMap.get(chosen)?.color}"></i><span>${chosen==='all'?'全部色号':`当前色号 ${chosen}`}</span><strong>${activeDone} / ${activeCount}</strong><span>已拼</span></div><div class="work-view-tools"><label><input id="workHighlight" type="checkbox" ${view.highlight!==false?'checked':''}>单色高亮</label><button id="workMirrorX" class="secondary-button" aria-pressed="${!!view.mirrorX}">↔ 左右镜像</button><button id="workMirrorY" class="secondary-button" aria-pressed="${!!view.mirrorY}">↕ 上下镜像</button><button id="workResetView" class="text-button">恢复原方向</button><span>镜像只改变观看方向，进度仍对应原格子。</span></div><div class="editor-tools"><label>当前色号 <select id="workColor"><option value="all">显示全部</option>${colors.map(code=>`<option value="${code}" ${chosen===code?'selected':''}>${code} · ${counts[code]} 颗 · 库存 ${fmt(state.stock[code])}</option>`).join('')}</select></label><button class="secondary-button" id="nextCell">标记下一个${chosen==='all'?'':' '+chosen}格</button><label class="tool-group">缩放 <input id="workZoom" type="range" min="12" max="36" step="2" value="${cellSize}"><span class="zoom-value">${cellSize}px</span></label></div><div class="pattern-scroll">${gridMarkup(pattern, { mode: 'work', chosen })}</div>`;
   host.querySelector('#workPattern').onchange = e => { state.activePattern = e.target.value; currentWorkColor = 'all'; persist(); renderWork(); };
+  for(const [id,key] of [['workMirrorX','mirrorX'],['workMirrorY','mirrorY']])host.querySelector('#'+id).onclick=()=>{pattern.workView={...pattern.workView,[key]:!pattern.workView?.[key]};persist();renderWork();};
+  host.querySelector('#workHighlight').onchange=e=>{pattern.workView={...pattern.workView,highlight:e.target.checked};persist();renderWork();};
+  host.querySelector('#workResetView').onclick=()=>{pattern.workView={...pattern.workView,mirrorX:false,mirrorY:false};persist();renderWork();};
   host.querySelector('#workColor').onchange = e => { currentWorkColor = e.target.value; renderWork(); };
-  host.querySelector('#nextCell').onclick = () => { const idx=pattern.cells.findIndex((code,i)=> colorMap.has(code)&&(chosen==='all'||code===chosen)&&!pattern.done?.[i]); if(idx>=0){pattern.done={...pattern.done,[idx]:true};persist();renderWork();} };
+  host.querySelector('#nextCell').onclick = () => { const idx=Array.from(host.querySelectorAll('[data-workcell]'),cell=>Number(cell.dataset.workcell)).find(i=>colorMap.has(pattern.cells[i])&&(chosen==='all'||pattern.cells[i]===chosen)&&!pattern.done?.[i])??-1; if(idx>=0){pattern.done={...pattern.done,[idx]:true};persist();renderWork();} };
   if(!pattern.consumed&&!insufficient&&!usage.blocked) host.querySelector('#finishWork').onclick = () => confirmDialog('完成图纸并扣减库存', `<p class="notice">将按${usage.fromFooter?'底部统计':'网格统计'}扣减 ${fmt(usage.total)} 颗，请确认以下用量。此操作只能执行一次。</p><ul>${Object.entries(usage.counts).map(([code,count])=>`<li>${code}：${fmt(count)} 颗</li>`).join('')}</ul>`, () => {
     const current = inventoryUsage(pattern);
     if(pattern.consumed || current.blocked || Object.entries(current.counts).some(([code,count])=>count>Number(state.stock[code]||0))){renderWork();return;}
@@ -382,7 +388,7 @@ document.querySelector('#patternList').addEventListener('click', event => {
   if(button.dataset.pattern==='delete')confirmDialog('删除这张图纸？','<p class="notice">删除后无法恢复。库存不会因此改变。</p>',()=>{state.patterns=state.patterns.filter(p=>p.id!==pattern.id);if(state.activePattern===pattern.id)state.activePattern=null;persist();renderPatterns();});
 });
 document.querySelector('#workArea').addEventListener('click', event => {
-  const cell=event.target.closest('[data-workcell]'); if(!cell)return;
+  const cell=event.target.closest('[data-workcell]'); if(!cell||cell.classList.contains('dim'))return;
   const pattern=state.patterns.find(p=>p.id===state.activePattern);if(!pattern)return;
   const i=Number(cell.dataset.workcell);if(!colorMap.has(pattern.cells[i]))return;pattern.done={...pattern.done,[i]:!pattern.done?.[i]};persist();renderWork();
 });
@@ -483,7 +489,7 @@ document.querySelector('#workArea').addEventListener('input', event => {
   cellSize=Number(event.target.value);
   const canvas=document.querySelector('#workArea .pattern-canvas');const pattern=state.patterns.find(item=>item.id===state.activePattern);
   canvas.style.setProperty('--cell-size',`${cellSize}px`);canvas.style.gridTemplateColumns=`30px repeat(${pattern.width}, ${cellSize}px)`;
-  canvas.querySelectorAll('.pattern-cell').forEach(cell=>{cell.style.width=`${cellSize}px`;cell.style.height=`${cellSize}px`;cell.textContent=cellSize>=24?cell.title.split(' · ').pop().replace('空格',''):'';});
+  canvas.querySelectorAll('.pattern-cell').forEach(cell=>{cell.style.width=`${cellSize}px`;cell.style.height=`${cellSize}px`;cell.textContent=cell.title.split(' · ').pop().replace('空格','');});
   event.target.nextElementSibling.textContent=`${cellSize}px`;
 });
 document.querySelector('#gridOverlay').onchange=drawImageCanvas;

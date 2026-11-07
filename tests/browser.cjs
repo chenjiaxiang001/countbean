@@ -14,6 +14,15 @@ async function main(){
    await page.waitForFunction(()=>sourceCanvas&&sourceCanvas.width>0);
    await page.locator('#gridCols').fill(String(fixture.cols));await page.locator('#gridRows').fill(String(fixture.rows));
    await page.evaluate(({board,footer})=>{cropRect=board;footerRect=footer;drawImageCanvas();},regions[fixture.id]);
+   // Start with an intentionally shifted selection, correct it in the fixed-grid UI.
+   await page.evaluate(()=>{cropRect.x+=5;});
+   await page.locator('#openAlignment').click();
+   await page.locator('#alignmentPanel summary').click();
+   await page.locator('#align-x').fill(String(regions[fixture.id].board.x));await page.locator('#align-x').dispatchEvent('change');
+   await page.locator('#alignmentZoom').selectOption('2');
+   if(fixture.id==='cat')await page.screenshot({path:'.local-tests/mobile-alignment.png'});
+   await page.locator('#applyAlignment').click();
+   assert.deepEqual(await page.evaluate(()=>cropRect),regions[fixture.id].board);
    await page.locator('#recognizePattern').click();
    await page.waitForFunction(()=>!document.querySelector('#recognizePattern').disabled,{},{timeout:90000});
    const result=await page.evaluate(()=>recognitionDraft?{counts:countPattern(recognitionDraft),footer:recognitionDraft.footerCounts,unknown:recognitionDraft.cells.filter(c=>c==='?').length,status:document.querySelector('#recognitionStatus').textContent,overflow:document.documentElement.scrollWidth>window.innerWidth}:null);
