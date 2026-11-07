@@ -7,6 +7,9 @@
   <meta name="description" content="拼豆库存与图纸工作台，数据保存在本机。">
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="recognition.css">
+  <link rel="stylesheet" href="visibility.css">
+  <link rel="stylesheet" href="grid.css">
   <title>豆豆工坊</title>
 </head>
 <body>
@@ -28,11 +31,23 @@
 
     <section class="view" id="patternsView">
       <div class="page-heading"><div><p class="eyebrow">PATTERN DESK</p><h1>我的图纸</h1></div><button class="primary-button" id="newPattern">＋ 新建图纸</button></div>
-      <div class="import-panel" id="importPanel">
-        <div class="import-icon">▦</div><div><h2>导入色号网格</h2><p>粘贴每格对应的色号，空格、逗号或制表符分隔；换行表示下一行。</p></div>
-        <textarea id="patternInput" rows="4" placeholder="A1 A1 B2 B2 C3&#10;A1 B2 B2 C3 C3"></textarea>
-        <div class="form-row"><label>图纸名称<input id="patternName" type="text" placeholder="例如：小花胸针"></label><button class="primary-button" id="importPattern">生成图纸</button></div>
-        <p class="input-hint">支持色号如 A1、M15；未知色号会标记出来供你修正。色号网格可以从表格复制粘贴。</p>
+      <div class="import-panel image-import" id="importPanel">
+        <div class="import-icon">▧</div><div><h2>从图片识别图纸</h2><p>选择图片后框选网格区域，并填写图纸行列数。</p></div>
+        <label class="file-picker">选择图纸图片<input id="patternImage" type="file" accept="image/*"></label>
+        <div id="imageStage" class="image-stage" hidden><canvas id="imageCanvas"></canvas><div class="crop-help">拖动框选网格内侧边界</div></div>
+        <div class="recognition-fields" id="recognitionFields" hidden>
+          <label>列数<input id="gridCols" type="number" min="1" max="160" value="48"></label>
+          <label>行数<input id="gridRows" type="number" min="1" max="160" value="48"></label>
+          <label class="pattern-name-field">图纸名称<input id="patternName" type="text" placeholder="例如：小花胸针"></label>
+          <button class="primary-button" id="recognizePattern">识别色号</button>
+        </div>
+        <div id="recognitionStatus" class="recognition-status" hidden></div>
+        <div id="recognitionAudit" class="recognition-audit" hidden></div>
+        <button class="secondary-button" id="saveRecognized" hidden>确认并保存图纸</button>
+        <details class="manual-import"><summary>粘贴色号网格</summary>
+          <textarea id="patternInput" rows="4" placeholder="A1 A1 B2 B2 C3&#10;A1 B2 B2 C3 C3"></textarea>
+          <button class="primary-button" id="importPattern">生成图纸</button>
+        </details>
       </div>
       <div id="patternList" class="pattern-list"></div>
       <div class="editor" id="patternEditor" hidden></div>
