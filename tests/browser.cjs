@@ -28,7 +28,7 @@ async function main(){
     await page.locator('#draftPaint').selectOption('A21');await page.locator('#applyDraftPaint').click();
     assert.equal(await page.evaluate(()=>recognitionDraft.cells.filter(c=>c==='?').length),5);
     await page.locator('#resetDraftPaint').click();assert.equal(await page.evaluate(()=>recognitionDraft.cells.filter(c=>c==='?').length),6);
-    await page.locator('#saveRecognized').click();await page.locator('#patternList [data-pattern="work"]').first().click();assert.equal(await page.locator('#finishWork').isDisabled(),true);await page.locator('[data-view="patterns"]').click();
+    await page.locator('#saveRecognized').click();await page.locator('#patternList [data-pattern="work"]').first().click();assert.equal(await page.locator('#finishWork').isDisabled(),false);await page.locator('#finishWork').click();assert.match(await page.locator('#dialogContent').innerText(),/底部统计.*1,896/);await page.locator('#dialogConfirm').click();assert.equal(await page.evaluate(()=>state.stock.A21),593);assert.equal(await page.locator('#finishWork').isDisabled(),true);await page.locator('[data-view="patterns"]').click();
    }
    if(fixture.id==='pink'){
     const input=page.locator('[data-legend-count]').first();await input.fill('316');await input.dispatchEvent('change');assert.equal(await page.evaluate(()=>recognitionDraft.footerCounts.F22),316);await page.locator('[data-legend-count]').first().fill('315');await page.locator('[data-legend-count]').first().dispatchEvent('change');

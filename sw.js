@@ -1,4 +1,4 @@
-const CACHE = 'countbean-v6';
+const CACHE = 'countbean-v7';
 const FILES = ['./','./index.html','./styles.css','./recognition.css','./roi.css','./visibility.css','./grid.css','./palette-data.js','./app.js','./recognizer.js','./recognition-flow.js','./ocr-runtime.js','./ocr-worker.js','./manifest.json'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(FILES)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith('countbean-')&&key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));
