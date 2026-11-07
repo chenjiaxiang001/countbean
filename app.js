@@ -175,7 +175,7 @@ async function getOcrWorker() {
     const worker = new Worker('./ocr-worker.js');
     ocrWorker = worker;
     worker.onmessage = ({data}) => {
-      const request=ocrRequests.get(data.id);if(!request)return;ocrRequests.delete(data.id);
+      const request=ocrRequests.get(data.id);if(!request)return;if(data.progress){setRecognitionStatus(data.progress);return;}ocrRequests.delete(data.id);
       if(data.error)request.reject(new Error(data.error));else request.resolve(data.result);
     };
     worker.onerror = () => {
