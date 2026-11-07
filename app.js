@@ -243,11 +243,16 @@ function invalidateRecognition(){
   document.querySelector('#recognitionAudit').hidden=true;document.querySelector('#recognitionPreview').hidden=true;document.querySelector('#saveRecognized').hidden=true;
   setRecognitionStatus('网格范围或行列数已改变，请重新识别。');
 }
-async function recognizeImage() {
+async function recognizeImage(allowUnequalCells=false) {
   const cols=Number(document.querySelector('#gridCols').value),rows=Number(document.querySelector('#gridRows').value);
   const board=cropRect&&{...cropRect},footer=footerRect&&{...footerRect};
   if(!sourceCanvas||!board||!footer)return setRecognitionStatus('请分别框选网格内侧和底部统计，网格不要包含坐标行列。',true);
   if(!Number.isInteger(cols)||!Number.isInteger(rows)||cols<1||rows<1||cols>160||rows>160)return setRecognitionStatus('请输入 1 到 160 之间的行列数。',true);
+  const cellRatio=(board.w/cols)/(board.h/rows);
+  if(allowUnequalCells!==true&&Math.abs(cellRatio-1)>.018){
+    confirmDialog('请核对行列数与选区', `<p>当前为 ${cols} 列 × ${rows} 行，选区分格后宽高相差 ${Math.abs((cellRatio-1)*100).toFixed(1)}%。常见拼豆图的格子应接近正方形，行列数或选区不准会导致采样错位。</p><p>若行数 ${rows} 正确，按选区比例估计约 ${Math.round(board.w/board.h*rows)} 列（仅作参考）。请取消后核对原图坐标和辅助格线；如果原图本来就经过拉伸，可确认继续。</p>`,()=>recognizeImage(true));
+    return;
+  }
   const controls=['#recognizePattern','#patternImage','#selectBoard','#selectLegend','#gridCols','#gridRows'];controls.forEach(id=>document.querySelector(id).disabled=true);
   recognitionDraft=null;recognitionSamples=null;samplingLegendIndex=null;draftSelection=null;draftHighlight='all';
   document.querySelector('#recognitionAudit').hidden=true;document.querySelector('#recognitionPreview').hidden=true;document.querySelector('#saveRecognized').hidden=true;
@@ -309,7 +314,7 @@ function exportPatternImage(pattern) {
     const x = margin + index % pattern.width * size; const y = margin + Math.floor(index / pattern.width) * size;
     ctx.fillStyle = patternColor(pattern,code); ctx.fillRect(x,y,size,size);
     ctx.strokeStyle = '#68716d'; ctx.lineWidth = 0.5; ctx.strokeRect(x,y,size,size);
-    ctx.fillStyle = patternTextColor(pattern,code); if (size >= 22) ctx.fillText(code,x+size/2,y+size/2);
+    ctx.fillStyle = patternTextColor(pattern,code); if (size >= 22 && code != null) ctx.fillText(code,x+size/2,y+size/2);
   });
   ctx.fillStyle = '#202725'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(`${pattern.name} · ${pattern.width} × ${pattern.height}`, 3, 15);
   const link = document.createElement('a'); link.download = `${pattern.name}.png`; link.href = canvas.toDataURL('image/png'); link.click();

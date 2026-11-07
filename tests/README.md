@@ -4,6 +4,7 @@ Use Node.js 20+ and `npm ci --registry=https://registry.npmjs.org`.
 
 - `npm test`: parsing, unknown colors, blank detection, quantity independence.
 - `node tests/inventory.cjs`: footer-first deduction, footer-only colors, shortages, repeat protection, persistence, invalid quantities and grid fallback.
+- `node tests/loading.cjs`: simulate failed model requests and recovery; check persistent cache/migration, wrong column-count warning, and blank-cell PNG labels. Requires the cat fixture.
 - `node tests/run-fixtures.cjs --assert`: actual ONNX inference and expected footer/grid results.
 - `npm run test:browser`: Edge mobile viewport, actual Worker/WASM, correction, persistence, touch selection and offline OCR. Requires installed Microsoft Edge.
 
