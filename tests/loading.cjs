@@ -6,11 +6,12 @@ async function main(){
  try{
   const context=await browser.newContext({serviceWorkers:'block'}),page=await context.newPage();
   let failures=0;
-  await context.route('**/ppocr-v4-rec.onnx',route=>{failures++;return route.abort('failed');});
+  const assetSource=require('node:fs').readFileSync('ocr-assets.js','utf8');const assets=JSON.parse(assetSource.slice(assetSource.indexOf('=')+1).trim().replace(/;$/,''));const blocked='**/'+assets.find(a=>a.name==='ppocr-v4-rec.onnx').parts[0].file;
+  await context.route(blocked,route=>{failures++;return route.abort('failed');});
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   const failure=await page.evaluate(async()=>{try{await getOcrWorker();return '';}catch(e){return e.message;}});
-  assert.match(failure,/ppocr-v4-rec.onnx/);assert.match(failure,/识别模型加载失败/);assert.equal(failures,3);
-  await context.unroute('**/ppocr-v4-rec.onnx');
+  assert.match(failure,/ppocr-v4-rec.onnx/);assert.match(failure,/块下载失败/);assert.equal(failures,3);
+  await context.unroute(blocked);
   assert.equal(await page.evaluate(async()=>{await getOcrWorker();return true;}),true,'retry after failed initialization');
   assert.equal(await page.evaluate(async()=>!!await (await caches.open('countbean-ocr-v1')).match(new URL('vendor/ocr/ppocr-v4-rec.onnx',location.href).href)),true);
   await page.locator('[data-view="patterns"]').click();await page.locator('#patternImage').setInputFiles('.local-tests/cat.png');await page.waitForFunction(()=>sourceCanvas?.width===1200);

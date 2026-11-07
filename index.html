@@ -47,6 +47,7 @@
         <label class="grid-overlay-toggle"><input id="gridOverlay" type="checkbox" checked>显示分格辅助线：应与原图格线重合，行列数按外侧坐标填写。</label>
         <button type="button" id="openAlignment" class="secondary-button">固定网格对齐 / 精调选区</button>
         <section id="alignmentPanel" hidden></section>
+        <details class="manual-import"><summary>首次下载失败？导入离线识别包</summary><p>可在网络正常的设备下载一次，再传到本机导入。只保存识别引擎，不修改库存和图纸。</p><p><a href="vendor/ocr/countbean-ocr.cbocr" download>下载离线识别包（约 13 MB）</a></p><label class="file-picker">选择离线识别包<input id="offlineOcrFile" type="file" accept=".cbocr"></label><p id="offlineOcrStatus" role="status"></p></details>
         <div id="recognitionStatus" class="recognition-status" hidden></div>
         <div id="recognitionAudit" class="recognition-audit" hidden></div>
         <div id="recognitionPreview" class="recognition-preview" hidden></div>
@@ -76,7 +77,10 @@
   <script src="palette-data.js"></script>
   <script src="recognizer.js"></script>
   <script src="recognition-flow.js"></script>
+  <script src="ocr-assets.js"></script>
+  <script src="ocr-download.js"></script>
   <script src="app.js"></script>
+  <script src="offline-import.js"></script>
   <script src="alignment.js"></script>
 </body>
 </html>

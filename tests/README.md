@@ -7,6 +7,7 @@ Use Node.js 20+ and `npm ci --registry=https://registry.npmjs.org`.
 - `node tests/loading.cjs`: simulate failed model requests and recovery; check persistent cache/migration, wrong column-count warning, and blank-cell PNG labels. Requires the cat fixture.
 - `node tests/alignment.cjs`: fixed-grid drag, pixel nudges, scale, zoom/pan, apply/cancel/reset and mobile layout. Requires the cat fixture. The four-image browser suite also corrects a deliberately shifted selection through the alignment UI before recognition.
 - `node tests/work-tools.cjs`: highlight, mirror index mapping, progress persistence, visual-order traversal, inventory stability and mobile layout.
+- `node tests/downloads.cjs`: fresh compressed downloads, failed-chunk retries, cache resume, corrupt cache recovery, corrupt-package rejection, import without prior OCR cache while offline, offline engine/reload and unchanged inventory.
 - `node tests/run-fixtures.cjs --assert`: actual ONNX inference and expected footer/grid results.
 - `npm run test:browser`: Edge mobile viewport, actual Worker/WASM, correction, persistence, touch selection and offline OCR. Requires installed Microsoft Edge.
 

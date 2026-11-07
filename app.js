@@ -254,12 +254,12 @@ async function recognizeImage(allowUnequalCells=false) {
     confirmDialog('请核对行列数与选区', `<p>当前为 ${cols} 列 × ${rows} 行，选区分格后宽高相差 ${Math.abs((cellRatio-1)*100).toFixed(1)}%。常见拼豆图的格子应接近正方形，行列数或选区不准会导致采样错位。</p><p>若行数 ${rows} 正确，按选区比例估计约 ${Math.round(board.w/board.h*rows)} 列（仅作参考）。请取消后核对原图坐标和辅助格线；如果原图本来就经过拉伸，可确认继续。</p>`,()=>recognizeImage(true));
     return;
   }
-  const controls=['#openAlignment','#recognizePattern','#patternImage','#selectBoard','#selectLegend','#gridCols','#gridRows'];controls.forEach(id=>document.querySelector(id).disabled=true);
+  const controls=['#offlineOcrFile','#openAlignment','#recognizePattern','#patternImage','#selectBoard','#selectLegend','#gridCols','#gridRows'];controls.forEach(id=>document.querySelector(id).disabled=true);
   recognitionDraft=null;recognitionSamples=null;samplingLegendIndex=null;draftSelection=null;draftHighlight='all';
   document.querySelector('#recognitionAudit').hidden=true;document.querySelector('#recognitionPreview').hidden=true;document.querySelector('#saveRecognized').hidden=true;
   const started=performance.now();
   try{
-    setRecognitionStatus(ocrWorker?'正在准备图例识别…':'首次加载识别引擎和模型（约 22 MB），之后可使用本机缓存…');
+    setRecognitionStatus(ocrWorker?'正在准备图例识别…':'首次加载压缩识别资源（约 13 MB），分块下载进度会自动保存…');
     await getOcrWorker();
     const result=await ChartRecognitionFlow.recognize(sourcePixels(),board,rows,cols,footer,sendOcrRequest,{onProgress:setRecognitionStatus,validCode:code=>colorMap.has(code)});
     recognitionSamples=result.samples;

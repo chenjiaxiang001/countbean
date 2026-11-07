@@ -1,5 +1,5 @@
-const CACHE = 'countbean-v10';
-const FILES = ['./','./index.html','./styles.css','./recognition.css','./roi.css','./visibility.css','./grid.css','./palette-data.js','./app.js','./alignment.js','./recognizer.js','./recognition-flow.js','./ocr-runtime.js','./ocr-worker.js','./manifest.json'];
+const CACHE = 'countbean-v11';
+const FILES = ['./','./index.html','./styles.css','./recognition.css','./roi.css','./visibility.css','./grid.css','./palette-data.js','./app.js','./alignment.js','./recognizer.js','./recognition-flow.js','./ocr-runtime.js','./ocr-worker.js','./ocr-assets.js','./ocr-download.js','./offline-import.js','./manifest.json'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(FILES)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil((async()=>{
   const keys=await caches.keys(),ocr=await caches.open('countbean-ocr-v1');
@@ -15,7 +15,9 @@ self.addEventListener('activate',event=>event.waitUntil((async()=>{
 })()));
 self.addEventListener('fetch',event=>{
   if(event.request.method!=='GET'||new URL(event.request.url).origin!==self.location.origin)return;
-  const isOcr=new URL(event.request.url).pathname.includes('/vendor/ocr/');
+  const pathname=new URL(event.request.url).pathname;
+  if(pathname.includes('/vendor/ocr/chunks/')||pathname.endsWith('.cbocr'))return;
+  const isOcr=pathname.includes('/vendor/ocr/');
   event.respondWith(caches.open(isOcr?'countbean-ocr-v1':CACHE).then(async cache=>{
     const saved=await cache.match(event.request);if(saved)return saved;
     const response=await fetch(event.request);
