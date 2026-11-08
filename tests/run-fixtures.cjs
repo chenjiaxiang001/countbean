@@ -22,7 +22,7 @@ async function main(){
   }
   fs.writeFileSync(path.join(root,'regression-results.json'),JSON.stringify(report,null,2));
   await session.release();
-  if(process.argv.includes('--assert'))for(const r of report){assert.equal(r.footerDiff.length,0,`${r.id}: footer mismatch`);if(r.id==='landscape'){assert.equal(r.unknown,1);assert.deepEqual(r.gridDiff,[{code:'H18',expected:406,actual:405}]);assert.equal(r.cells[1561],'?');}else if(r.id!=='bread'){assert.equal(r.gridDiff.length,0,`${r.id}: grid counts mismatch`);assert.equal(r.unknown,0);}else{assert.equal(r.unknown,6);assert.deepEqual(r.gridDiff,[{code:'A21',expected:407,actual:401}]);}}
+  if(process.argv.includes('--assert'))for(const r of report){if(r.id==='bread')assert.deepEqual(r.footerDiff,[{code:'G14',expected:230,actual:null}],'conflicting 230/250 must require review');else assert.equal(r.footerDiff.length,0,`${r.id}: footer mismatch`);if(r.id==='landscape'){assert.equal(r.unknown,1);assert.deepEqual(r.gridDiff,[{code:'H18',expected:406,actual:405}]);assert.equal(r.cells[1561],'?');}else if(r.id!=='bread'){assert.equal(r.gridDiff.length,0,`${r.id}: grid counts mismatch`);assert.equal(r.unknown,0);}else{assert.equal(r.unknown,6);assert.deepEqual(r.gridDiff,[{code:'A21',expected:407,actual:401}]);}}
 }
 main().catch(e=>{console.error(e);process.exitCode=1});
 module.exports={regions};

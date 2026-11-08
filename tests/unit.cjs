@@ -23,3 +23,14 @@ test('无文字的白底和棋盘背景不计作豆子',()=>{
   const samples=E.sampleGrid(image,{x:0,y:0,w:24,h:24},1,1);
   assert.deepEqual(E.classifySamples(samples,[{code:'H2',rgb:[255,255,255]}]).cells,[null]);
 });
+test('分栏图例保留仅一张卡片的末行和白底色号',()=>{
+  const image={width:400,height:80,data:new Uint8ClampedArray(400*80*4).fill(255)};
+  const fill=(x,y,w,h,rgb)=>{for(let yy=y;yy<y+h;yy++)for(let xx=x;xx<x+w;xx++)image.data.set([...rgb,255],(yy*image.width+xx)*4);};
+  for(const [x,y,color] of [[5,5,[250,210,100]],[110,5,[255,255,255]],[215,5,[20,30,90]],[5,45,[200,100,50]]]){
+    fill(x,y,90,28,[140,140,140]);fill(x+1,y+1,88,26,[255,255,255]);fill(x+1,y+1,37,26,color);fill(x+38,y+1,1,26,[140,140,140]);
+  }
+  const cards=E.detectLegendCards(image,{x:0,y:0,w:400,h:80});
+  assert.equal(cards.length,4);assert.ok(cards.every(c=>c.layout==='split'));assert.equal(cards[3].rect.y,45);
+  assert.deepEqual(cards[1].rgb,[255,255,255]);assert.ok(cards[0].codeRect.w>30&&cards[0].codeRect.w<45);
+  assert.ok(cards[0].countRect.x>cards[0].codeRect.x+cards[0].codeRect.w);
+});

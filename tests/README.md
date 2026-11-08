@@ -8,6 +8,9 @@ Use Node.js 20+ and `npm ci --registry=https://registry.npmjs.org`.
 - `node tests/alignment.cjs`: fixed-grid drag, pixel nudges, scale, zoom/pan, apply/cancel/reset and mobile layout. Requires the cat fixture. The four-image browser suite also corrects a deliberately shifted selection through the alignment UI before recognition.
 - `node tests/work-tools.cjs`: highlight, mirror index mapping, progress persistence, visual-order traversal, inventory stability and mobile layout.
 - `node tests/downloads.cjs`: fresh compressed downloads, failed-chunk retries, cache resume, corrupt cache recovery, corrupt-package rejection, import without prior OCR cache while offline, offline engine/reload and unchanged inventory.
+- `node tests/footers.cjs`: three additional original images, all 33 footer code/quantity pairs, confirmation before saving, confirmation invalidation after edits, persisted confirmation and deduction guard. Fixtures `.local-tests/duck.png`, `rabbit.png`, `dog.png` come from attachments `ebf3363c-c513-4188-81f3-5cdf4bdffc1e`, `2fcd5e54-5e99-45c1-add9-701389f4c3fb`, `a51a31a7-b996-43a1-aa2e-738c99b54292`; preserve dimensions and ICC. Expected values/regions are in `footer-cases.json`.
+
+The earlier bread fixture now deliberately leaves G14's printed quantity unresolved: original and normalized OCR disagree (230 vs 250), and a third reading is malformed. Node expects a missing G14 footer count; browser tests verify saving is blocked, then explicitly enter the manually checked 230 before confirming and saving. This is a review requirement, not an automatic recognition success.
 - `node tests/run-fixtures.cjs --assert`: actual ONNX inference and expected footer/grid results.
 - `npm run test:browser`: Edge mobile viewport, actual Worker/WASM, correction, persistence, touch selection and offline OCR. Requires installed Microsoft Edge.
 

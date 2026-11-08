@@ -28,23 +28,25 @@ async function main(){
    const result=await page.evaluate(()=>recognitionDraft?{counts:countPattern(recognitionDraft),footer:recognitionDraft.footerCounts,unknown:recognitionDraft.cells.filter(c=>c==='?').length,status:document.querySelector('#recognitionStatus').textContent,overflow:document.documentElement.scrollWidth>window.innerWidth}:null);
    fs.writeFileSync(`.local-tests/browser-${fixture.id}.json`,JSON.stringify(await page.evaluate(()=>({result:recognitionDraft,samples:recognitionSamples.map(s=>({rgb:s.rgb,ink:s.ink}))})),null,2));
    const canvasPng=await page.evaluate(()=>sourceCanvas.toDataURL('image/png').split(',')[1]);fs.writeFileSync(`.local-tests/${fixture.id}-browser.png`,Buffer.from(canvasPng,'base64'));
-   assert.ok(result,await page.locator('#recognitionStatus').textContent());assert.deepEqual(result.footer,fixture.counts,fixture.id+' footer');
+   assert.ok(result,await page.locator('#recognitionStatus').textContent());if(fixture.id==='bread'){const expected={...fixture.counts};delete expected.G14;assert.deepEqual(result.footer,expected);assert.equal(await page.evaluate(()=>recognitionDraft.legend.find(c=>c.code==='G14').count),null);}else assert.deepEqual(result.footer,fixture.counts,fixture.id+' footer');
    if(fixture.id==='landscape'){assert.deepEqual(result.counts,{...fixture.counts,C24:702});assert.equal(result.unknown,1);assert.equal(await page.evaluate(()=>recognitionDraft.cells[131]),'?');assert.deepEqual(await page.evaluate(()=>[821,1089,1354,1588].map(i=>recognitionDraft.cells[i])),['G1','G1','H18','B23']);}else if(fixture.id!=='bread'){assert.deepEqual(result.counts,fixture.counts,fixture.id+' grid');assert.equal(result.unknown,0);}else{assert.equal(result.unknown,6);assert.equal(result.counts.A21,401);}
    assert.equal(result.overflow,false,'mobile horizontal overflow');
    await page.locator('#recognitionAudit').scrollIntoViewIfNeeded();await page.screenshot({path:`.local-tests/mobile-${fixture.id}.png`});
    if(fixture.id==='bread'){
+    assert.equal(await page.locator('#saveRecognized').isDisabled(),true);
+    const qty=page.getByRole('spinbutton',{name:'G14 图例数量',exact:true});await qty.fill('230');await qty.dispatchEvent('change');
     await page.locator('#nextDraftUnknown').click();await page.locator('#draftSourceCell').waitFor();
     await page.locator('#draftPaint').selectOption('A21');await page.locator('#applyDraftPaint').click();
     assert.equal(await page.evaluate(()=>recognitionDraft.cells.filter(c=>c==='?').length),5);
     await page.locator('#resetDraftPaint').click();assert.equal(await page.evaluate(()=>recognitionDraft.cells.filter(c=>c==='?').length),6);
-    await page.locator('#saveRecognized').click();await page.locator('#patternList [data-pattern="work"]').first().click();assert.equal(await page.locator('#finishWork').isDisabled(),false);await page.locator('#finishWork').click();assert.match(await page.locator('#dialogContent').innerText(),/底部统计.*1,896/);await page.locator('#dialogConfirm').click();assert.equal(await page.evaluate(()=>state.stock.A21),593);assert.equal(await page.locator('#finishWork').isDisabled(),true);await page.locator('[data-view="patterns"]').click();
+    await page.locator('#confirmFooter').check();await page.locator('#saveRecognized').click();await page.locator('#patternList [data-pattern="work"]').first().click();assert.equal(await page.locator('#finishWork').isDisabled(),false);await page.locator('#finishWork').click();assert.match(await page.locator('#dialogContent').innerText(),/底部统计.*1,896/);await page.locator('#dialogConfirm').click();assert.equal(await page.evaluate(()=>state.stock.A21),593);assert.equal(await page.locator('#finishWork').isDisabled(),true);await page.locator('[data-view="patterns"]').click();
    }
    if(fixture.id==='pink'){
     const input=page.locator('[data-legend-count]').first();await input.fill('316');await input.dispatchEvent('change');assert.equal(await page.evaluate(()=>recognitionDraft.footerCounts.F22),316);await page.locator('[data-legend-count]').first().fill('315');await page.locator('[data-legend-count]').first().dispatchEvent('change');
    }
    results.push({id:fixture.id,...result});
   }
-  await page.locator('#saveRecognized').click();
+  await page.locator('#confirmFooter').check();await page.locator('#saveRecognized').click();
   const stored=await page.evaluate(()=>JSON.parse(localStorage.getItem('countbean-state')));assert.equal(stored.patterns.length,2);assert.equal(stored.stock.H7,1000);
   await page.reload();await page.locator('[data-view="patterns"]').click();assert.equal(await page.locator('#patternList .pattern-row').count(),2);
   // Same-origin runtime/model must be cached for the single-device offline workflow.

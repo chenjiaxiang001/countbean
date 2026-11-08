@@ -75,7 +75,7 @@ function inventoryUsage(pattern) {
   const fromFooter = entries.length > 0;
   const counts = fromFooter ? { ...pattern.footerCounts } : countPattern(pattern);
   const invalid = entries.some(([code,count]) => !colorMap.has(code) || !Number.isSafeInteger(count) || count < 0);
-  const blocked = invalid || (!fromFooter && pattern.cells.includes('?'));
+  const blocked = invalid || (fromFooter && pattern.footerReviewRequired && !pattern.footerConfirmed) || (!fromFooter && pattern.cells.includes('?'));
   return { counts, fromFooter, blocked, total: Object.values(counts).reduce((sum,n)=>sum+n,0) };
 }
 function patternColor(pattern,code){const rgb=pattern.legend?.find(c=>c.code===code)?.rgb;return rgb?`rgb(${rgb.join(',')})`:colorMap.get(code)?.color||(code==='?'?'#f5d1cc':'#fff');}
@@ -200,6 +200,8 @@ function updateRecognitionDraft(reclassify=true) {
     for(const [index,code] of Object.entries(recognitionDraft.autoOverrides||{}))if(code==='?'||recognitionDraft.legend.some(c=>c.code===code))recognitionDraft.cells[Number(index)]=code;
     for(const [index,code] of Object.entries(recognitionDraft.overrides||{}))recognitionDraft.cells[Number(index)]=code;
   }
+  const signature=JSON.stringify(recognitionDraft.legend.map(c=>[c.code,c.count]));
+  if(recognitionDraft.footerSignature!==signature){recognitionDraft.footerConfirmed=false;recognitionDraft.footerSignature=signature;}
   recognitionDraft.footerCounts=Object.fromEntries(recognitionDraft.legend.filter(item=>colorMap.has(item.code)&&item.count!==null).map(item=>[item.code,item.count]));
   renderRecognitionAudit(recognitionDraft);renderRecognitionPreview();
 }
@@ -207,16 +209,21 @@ function renderRecognitionAudit(pattern) {
   const host=document.querySelector('#recognitionAudit'),counts=countPattern(pattern);
   const unknown=pattern.cells.filter(code=>code==='?').length;
   const occupied=pattern.cells.filter(code=>code!==null).length;
-  const unresolved=pattern.legend.some((item,i)=>!colorMap.has(item.code)||item.count===null||pattern.legend.some((other,j)=>j!==i&&other.code===item.code));
+  const unresolved=!pattern.legend.length||pattern.legend.some((item,i)=>!colorMap.has(item.code)||!Number.isSafeInteger(item.count)||item.count<0||pattern.legend.some((other,j)=>j!==i&&other.code===item.code));
   const mismatch=pattern.legend.filter(item=>item.code&&item.count!==null&&(counts[item.code]||0)!==item.count).length;
   host.hidden=false;
-  host.innerHTML=`<strong>网格 ${pattern.width} × ${pattern.height} · 有豆 ${occupied} 格 · 待校对 ${unknown} 格</strong><p>图例读到 ${pattern.legend.length} 个色块；${mismatch?`${mismatch} 色数量不一致，请对照原图`:'已读出的数量与网格吻合'}。库存扣减以保存后的底部统计为准，不会强行改格子凑数。</p><section class="legend-editor"><h3>底部统计校对</h3><p>左侧保留原图色块，右侧可修正色号或数量。取色只用于纠正个别样本。</p><div class="legend-table-head"><span>原图</span><span>色号</span><span>图例颗数</span><span>网格颗数</span><span>校对</span></div>${pattern.legend.map((item,index)=>`<div class="legend-edit-row ${(item.count!==null&&(counts[item.code]||0)!==item.count)||!item.code?'mismatch':''}" data-legend-index="${index}"><canvas data-legend-source="${index}" width="150" height="52" aria-label="图例 ${index+1} 原图"></canvas><select data-legend-code aria-label="图例 ${index+1} 色号"><option value="">未读出</option>${palette.map(({code})=>`<option value="${code}" ${code===item.code?'selected':''}>${code}</option>`).join('')}</select><input data-legend-count aria-label="${item.code||'未读色号'} 图例数量" type="number" min="0" step="1" value="${item.count??''}" placeholder="未读"><strong>${counts[item.code]||0}</strong><div class="legend-row-actions"><button type="button" data-sample-index="${index}" class="secondary-button">${samplingLegendIndex===index?'取消取色':'取色'}</button><button type="button" data-remove-legend="${index}" aria-label="移除图例 ${index+1}">×</button></div>${item.recoveredFromCells?'<small>色号已用同色格文字复核</small>':''}</div>`).join('')}<div class="legend-add"><select id="addLegendCode" aria-label="补充色号">${palette.filter(({code})=>!pattern.legend.some(item=>item.code===code)).map(({code})=>`<option value="${code}">${code}</option>`).join('')}</select><button type="button" class="secondary-button" id="addLegend">补充色号</button></div></section>`;
+  host.innerHTML=`<strong>网格 ${pattern.width} × ${pattern.height} · 有豆 ${occupied} 格 · 待校对 ${unknown} 格</strong><p>图例读到 ${pattern.legend.length} 个色块；${mismatch?`${mismatch} 色数量不一致，请对照原图`:'已读出的数量与网格吻合'}。库存扣减以保存后的底部统计为准，不会强行改格子凑数。</p><section class="legend-editor"><h3>底部统计校对</h3><p>左侧保留原图色块，右侧可修正色号或数量。取色只用于纠正个别样本。</p><div class="legend-table-head"><span>原图</span><span>色号</span><span>图例颗数</span><span>网格颗数</span><span>校对</span></div>${pattern.legend.map((item,index)=>`<div class="legend-edit-row ${(item.count!==null&&(counts[item.code]||0)!==item.count)||!item.code?'mismatch':''}" data-legend-index="${index}"><canvas data-legend-source="${index}" width="150" height="52" aria-label="图例 ${index+1} 原图"></canvas><select data-legend-code aria-label="图例 ${index+1} 色号"><option value="">未读出</option>${palette.map(({code})=>`<option value="${code}" ${code===item.code?'selected':''}>${code}</option>`).join('')}</select><input data-legend-count aria-label="${item.code||'未读色号'} 图例数量" type="number" min="0" step="1" value="${item.count??''}" placeholder="未读"><strong>${counts[item.code]||0}</strong><div class="legend-row-actions"><button type="button" data-sample-index="${index}" class="secondary-button">${samplingLegendIndex===index?'取消取色':'取色'}</button><button type="button" data-remove-legend="${index}" aria-label="移除图例 ${index+1}">×</button></div>${item.recoveredFromCells?'<small>色号已用同色格文字复核</small>':''}${item.needsReview?'<small>文字读数存在疑点，请对照左侧原图核对</small>':''}</div>`).join('')}<div class="legend-add"><select id="addLegendCode" aria-label="补充色号">${palette.filter(({code})=>!pattern.legend.some(item=>item.code===code)).map(({code})=>`<option value="${code}">${code}</option>`).join('')}</select><button type="button" class="secondary-button" id="addLegend">补充色号</button></div></section>`;
   host.querySelectorAll('[data-legend-source]').forEach(canvas=>{
     const item=pattern.legend[Number(canvas.dataset.legendSource)],ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
-    if(item.rect){const r=item.rect,h=item.countRect?item.countRect.y+item.countRect.h-r.y:r.h;const scale=Math.min(canvas.width/r.w,canvas.height/h);ctx.drawImage(sourceCanvas,r.x,r.y,r.w,h,0,0,r.w*scale,h*scale);}else{ctx.fillStyle=item.rgb?`rgb(${item.rgb.join(',')})`:'#eee';ctx.fillRect(0,0,canvas.width,canvas.height);}
+    if(item.rect){const r=item.rect,h=item.countRect?Math.max(r.h,item.countRect.y+item.countRect.h-r.y):r.h;const scale=Math.min(canvas.width/r.w,canvas.height/h);ctx.drawImage(sourceCanvas,r.x,r.y,r.w,h,0,0,r.w*scale,h*scale);}else{ctx.fillStyle=item.rgb?`rgb(${item.rgb.join(',')})`:'#eee';ctx.fillRect(0,0,canvas.width,canvas.height);}
   });
-  const save=document.querySelector('#saveRecognized');save.hidden=false;save.disabled=unresolved;
-  save.textContent=unresolved?'先补齐图例色号和数量':unknown||mismatch?'保存待校对图纸':'确认并保存图纸';
+  const total=pattern.legend.reduce((sum,c)=>sum+(Number.isSafeInteger(c.count)?c.count:0),0);
+  const review=document.createElement('label');review.className='footer-confirm';
+  review.innerHTML=`<input id="confirmFooter" type="checkbox" ${pattern.footerConfirmed?'checked':''} ${unresolved?'disabled':''}>已对照原图逐项核对底部 ${pattern.legend.length} 个色号、合计 ${fmt(total)} 颗（包括是否漏色号），同意按此用量扣库存`;
+  host.append(review);
+  review.querySelector('input').onchange=e=>{pattern.footerConfirmed=e.target.checked;renderRecognitionAudit(pattern);};
+  const save=document.querySelector('#saveRecognized');save.hidden=false;save.disabled=unresolved||!pattern.footerConfirmed;
+  save.textContent=unresolved?'先补齐图例色号和数量':!pattern.footerConfirmed?'先核对并确认底部统计':unknown||mismatch?'保存待校对图纸':'确认并保存图纸';
 }
 function renderRecognitionPreview() {
   const host=document.querySelector('#recognitionPreview');
@@ -263,7 +270,7 @@ async function recognizeImage(allowUnequalCells=false) {
     await getOcrWorker();
     const result=await ChartRecognitionFlow.recognize(sourcePixels(),board,rows,cols,footer,sendOcrRequest,{onProgress:setRecognitionStatus,validCode:code=>colorMap.has(code)});
     recognitionSamples=result.samples;
-    recognitionDraft={id:crypto.randomUUID(),name:document.querySelector('#patternName').value.trim()||`图纸 ${state.patterns.length+1}`,width:cols,height:rows,cells:result.cells,done:{},footerCounts:result.footerCounts,legend:result.legend,boardRect:board,issues:result.issues,autoOverrides:result.autoOverrides,verificationDetails:result.verificationDetails,source:'image'};
+    recognitionDraft={id:crypto.randomUUID(),name:document.querySelector('#patternName').value.trim()||`图纸 ${state.patterns.length+1}`,width:cols,height:rows,cells:result.cells,done:{},footerCounts:result.footerCounts,legend:result.legend,boardRect:board,issues:result.issues,autoOverrides:result.autoOverrides,verificationDetails:result.verificationDetails,source:'image',footerReviewRequired:true,footerConfirmed:false};
     updateRecognitionDraft(false);
     const unknown=result.cells.filter(code=>code==='?').length;
     setRecognitionStatus(`识别用时 ${((performance.now()-started)/1000).toFixed(1)} 秒，读到 ${result.legend.length} 个图例色块。${unknown?`${unknown} 格待校对，可在预览中定位。`:'请对照底部统计和原图检查后保存。'}`);

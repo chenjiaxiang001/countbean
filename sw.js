@@ -1,4 +1,4 @@
-const CACHE = 'countbean-v11';
+const CACHE = 'countbean-v12';
 const FILES = ['./','./index.html','./styles.css','./recognition.css','./roi.css','./visibility.css','./grid.css','./palette-data.js','./app.js','./alignment.js','./recognizer.js','./recognition-flow.js','./ocr-runtime.js','./ocr-worker.js','./ocr-assets.js','./ocr-download.js','./offline-import.js','./manifest.json'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(FILES)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil((async()=>{

@@ -23,7 +23,52 @@
     for(let i=0;i<=mask.length;i++){if(mask[i]&&start<0)start=i;else if(!mask[i]&&start>=0){out.push([start,i]);start=-1;}}
     return out;
   }
+  function detectSplitLegendCards(image, rectangle) {
+    const r=bounds(image,rectangle),w=r.w,h=r.h,mask=new Uint8Array(w*h),seen=new Uint8Array(w*h),boxes=[];
+    for(let y=0;y<h;y++)for(let x=0;x<w;x++){const at=((r.y+y)*image.width+r.x+x)*4;mask[y*w+x]=Math.min(image.data[at],image.data[at+1],image.data[at+2])<235?1:0;}
+    // Outlined cards join the colored label and white quantity into one component.
+    // Process individual components so a short final row is not discarded by row density.
+    for(let seed=0;seed<mask.length;seed++){
+      if(!mask[seed]||seen[seed])continue;
+      const queue=[seed];seen[seed]=1;let l=w,t=h,rr=0,b=0;
+      for(let q=0;q<queue.length;q++){
+        const at=queue[q],x=at%w,y=Math.floor(at/w);l=Math.min(l,x);rr=Math.max(rr,x);t=Math.min(t,y);b=Math.max(b,y);
+        for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const xx=x+dx,yy=y+dy,n=yy*w+xx;if(xx>=0&&xx<w&&yy>=0&&yy<h&&mask[n]&&!seen[n]){seen[n]=1;queue.push(n);}}
+      }
+      const bw=rr-l+1,bh=b-t+1;
+      if(bw<45||bh<16||bw/bh<2||bw/bh>6)continue;
+      const rect={x:r.x+l,y:r.y+t,w:bw,h:bh};
+      const right=dominant(pixels(image,{x:rect.x+bw*.68,y:rect.y+bh*.15,w:bw*.25,h:bh*.7}));
+      if(Math.min(...right)<240)continue;
+      // A closed border must span most of the card's top and bottom edges.
+      const edgeHit=y=>{let hits=0;for(let x=l+3;x<=rr-3;x++)if(mask[y*w+x]||mask[Math.min(h-1,y+1)*w+x])hits++;return hits/(bw-6);};
+      if(edgeHit(t)<.7||edgeHit(Math.max(t,b-1))<.7)continue;
+      boxes.push(rect);
+    }
+    if(boxes.length<3)return [];
+    const typical=median(boxes.map(b=>b.h));
+    const cards=boxes.filter(b=>Math.abs(b.h-typical)<typical*.25).sort((a,b)=>Math.abs(a.y-b.y)<typical*.5?a.x-b.x:a.y-b.y);
+    const dividers=cards.flatMap(box=>{
+      let best=-1,cut=null;
+      for(let x=Math.round(box.w*.30);x<=Math.round(box.w*.60);x++){
+        const left=[],right=[];
+        for(const y of [3,4,box.h-5,box.h-4]){
+          for(const [dx,out] of [[-2,left],[2,right]]){const at=((box.y+y)*image.width+box.x+x+dx)*4;out.push([image.data[at],image.data[at+1],image.data[at+2]]);}
+        }
+        const l=[0,1,2].map(c=>median(left.map(p=>p[c]))),rr=[0,1,2].map(c=>median(right.map(p=>p[c])));
+        const score=distance(l,rr);if(Math.min(...rr)>240&&Math.min(...l)<230&&score>best){best=score;cut=x;}
+      }
+      return cut===null?[]:[cut/box.w];
+    });
+    const splitRatio=dividers.length?median(dividers):.43;
+    return cards.map((box,id)=>{
+      const cut=Math.round(box.w*splitRatio);
+      const codeRect={x:box.x+2,y:box.y+2,w:cut-3,h:box.h-4},countRect={x:box.x+cut+2,y:box.y+2,w:box.w-cut-4,h:box.h-4};
+      return {id,rect:box,codeRect,countRect,rgb:dominant(pixels(image,codeRect)),layout:'split',code:null,count:null,confidence:0};
+    });
+  }
   function detectLegendCards(image, rectangle) {
+    const split=detectSplitLegendCards(image,rectangle);if(split.length)return split;
     const r=bounds(image,rectangle), rows=[];
     for(let y=r.y;y<r.y+r.h;y++){let n=0;for(let x=r.x;x<r.x+r.w;x++){const i=(y*image.width+x)*4;if(Math.min(image.data[i],image.data[i+1],image.data[i+2])<235)n++;}rows.push(n/r.w>.12);}
     const bands=[];
